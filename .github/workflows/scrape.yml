@@ -1,7 +1,12 @@
-name: DealerRater Scrape — Garrison States
+name: DealerRater Scrape
 
 on:
   workflow_dispatch:
+    inputs:
+      rep:
+        description: 'Rep territory to scrape (garrison / justin / mike)'
+        required: true
+        default: 'garrison'
 
 jobs:
   scrape:
@@ -19,13 +24,13 @@ jobs:
         run: pip install requests beautifulsoup4 lxml
 
       - name: Run scraper
-        run: python main.py
+        run: python main.py --rep ${{ github.event.inputs.rep }}
 
       - name: Upload final CSV
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GARRISON-STATES-FINAL
+          name: ${{ github.event.inputs.rep }}-states-FINAL
           path: output/final/garrison-states-master.csv
           retention-days: 30
 
@@ -33,6 +38,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: raw-backup
+          name: ${{ github.event.inputs.rep }}-raw-backup
           path: output/raw/dealerrater_raw.csv
           retention-days: 7

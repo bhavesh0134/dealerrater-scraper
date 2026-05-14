@@ -38,22 +38,54 @@ logging.basicConfig(
 )
 log = logging.getLogger("main")
 
-# ── Target states (Garrison territory by default) ──────────────────────────────
-GARRISON_STATES_DISPLAY = {
+# ── Rep territory state sets ───────────────────────────────────────────────────
+GARRISON_STATES = {
     "AK", "AZ", "CA", "CO", "HI", "ID", "MN", "MT", "ND",
     "NM", "NV", "OR", "SD", "UT", "WA", "WY",
+}
+JUSTIN_STATES = {
+    "AL", "AR", "FL", "GA", "IA", "KS", "KY", "LA", "MO",
+    "MS", "NE", "OK", "SC", "TN", "TX",
+}
+MIKE_STATES = {
+    "CT", "DC", "DE", "IL", "IN", "MA", "MD", "ME", "MI",
+    "NH", "NJ", "NY", "NC", "OH", "PA", "RI", "VT", "VA", "WI",
+}
+
+REP_STATES: dict[str, set[str]] = {
+    "garrison": GARRISON_STATES,
+    "justin":   JUSTIN_STATES,
+    "mike":     MIKE_STATES,
 }
 
 # Map full state names → abbreviations (for matching scraped state text)
 STATE_ABBR = {
+    # Garrison
     "alaska": "AK", "arizona": "AZ", "california": "CA", "colorado": "CO",
     "hawaii": "HI", "idaho": "ID", "minnesota": "MN", "montana": "MT",
     "north dakota": "ND", "new mexico": "NM", "nevada": "NV", "oregon": "OR",
     "south dakota": "SD", "utah": "UT", "washington": "WA", "wyoming": "WY",
-    # Abbreviations pass through
-    "ak": "AK", "az": "AZ", "ca": "CA", "co": "CO", "hi": "HI", "id": "ID",
-    "mn": "MN", "mt": "MT", "nd": "ND", "nm": "NM", "nv": "NV", "or": "OR",
-    "sd": "SD", "ut": "UT", "wa": "WA", "wy": "WY",
+    # Justin
+    "alabama": "AL", "arkansas": "AR", "florida": "FL", "georgia": "GA",
+    "iowa": "IA", "kansas": "KS", "kentucky": "KY", "louisiana": "LA",
+    "missouri": "MO", "mississippi": "MS", "nebraska": "NE", "oklahoma": "OK",
+    "south carolina": "SC", "tennessee": "TN", "texas": "TX",
+    # Mike
+    "connecticut": "CT", "dc": "DC", "district of columbia": "DC",
+    "delaware": "DE", "illinois": "IL", "indiana": "IN",
+    "massachusetts": "MA", "maryland": "MD", "maine": "ME", "michigan": "MI",
+    "new hampshire": "NH", "new jersey": "NJ", "new york": "NY",
+    "north carolina": "NC", "ohio": "OH", "pennsylvania": "PA",
+    "rhode island": "RI", "vermont": "VT", "virginia": "VA", "wisconsin": "WI",
+    # All abbreviations pass through
+    "ak":"AK","az":"AZ","ca":"CA","co":"CO","hi":"HI","id":"ID","mn":"MN",
+    "mt":"MT","nd":"ND","nm":"NM","nv":"NV","or":"OR","sd":"SD","ut":"UT",
+    "wa":"WA","wy":"WY","al":"AL","ar":"AR","fl":"FL","ga":"GA","ia":"IA",
+    "ks":"KS","ky":"KY","la":"LA","mo":"MO","ms":"MS","ne":"NE","ok":"OK",
+    "sc":"SC","tn":"TN","tx":"TX","ct":"CT","dc":"DC","de":"DE","il":"IL",
+    "in":"IN","ma":"MA","md":"MD","me":"ME","mi":"MI","nh":"NH","nj":"NJ",
+    "ny":"NY","nc":"NC","oh":"OH","pa":"PA","ri":"RI","vt":"VT","va":"VA",
+    "wi":"WI",
 }
 
 # ── Data model ─────────────────────────────────────────────────────────────────
@@ -106,8 +138,11 @@ def _resolve_state_abbr(raw: str) -> str:
     return STATE_ABBR.get(raw.strip().lower(), "")
 
 
-def _is_garrison_state(abbr: str) -> bool:
-    return abbr in GARRISON_STATES_DISPLAY
+def _get_rep(abbr: str) -> str:
+    if abbr in GARRISON_STATES: return "Garrison Ramoso"
+    if abbr in JUSTIN_STATES:   return "Justin Smith"
+    if abbr in MIKE_STATES:     return "Mike Arena"
+    return ""
 
 
 # ── Main scrape logic ──────────────────────────────────────────────────────────
@@ -175,7 +210,7 @@ def run_scrape(
                 dealer_url       = url,
                 oem_brand        = oem,
                 copy_variant     = config.OEM_VARIANT.get(oem, ""),
-                assigned_rep     = "Garrison Ramoso" if _is_garrison_state(state_abbr) else config.get_rep(state_abbr),
+                assigned_rep     = _get_rep(state_abbr),
                 profile_type     = "Launcher",
                 high_volume      = data["review_count"] >= config.HIGH_VOLUME_THRESHOLD,
             )
@@ -218,6 +253,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="DealerRater scraper — Spiffy KALI")
     p.add_argument("--oem", help="Single OEM (e.g. Ford). Default: all 5.")
     p.add_argument("--state", help="Single state abbreviation filter (e.g. CA).")
+    p.add_argument("--rep", choices=["garrison","justin","mike"], help="Filter by rep territory.")
     p.add_argument("--all-states", action="store_true", help="No state filter — scrape all states.")
     p.add_argument("--output-dir", default="output")
     p.add_argument("--debug-url", help="Scrape a single URL and print the result, then exit.")
@@ -243,8 +279,10 @@ def main() -> None:
         filter_states: set[str] = set()
     elif args.state:
         filter_states = {args.state.upper()}
+    elif args.rep:
+        filter_states = REP_STATES[args.rep]
     else:
-        filter_states = GARRISON_STATES_DISPLAY  # Default: Garrison territory
+        filter_states = GARRISON_STATES  # Default: Garrison territory
 
     checkpoint_path = os.path.join(args.output_dir, ".checkpoint.json")
 
