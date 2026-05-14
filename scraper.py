@@ -48,12 +48,27 @@ class DealerRaterScraper:
 
     async def __aenter__(self) -> "DealerRaterScraper":
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=True)
+        self._browser = await self._playwright.chromium.launch(
+            headless=False,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--window-size=1280,800",
+            ],
+        )
         self._context = await self._browser.new_context(
             user_agent=_USER_AGENT,
             viewport={"width": 1280, "height": 800},
             locale="en-US",
             timezone_id="America/New_York",
+            extra_http_headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Upgrade-Insecure-Requests": "1",
+            },
         )
         return self
 
