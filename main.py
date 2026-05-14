@@ -2,29 +2,23 @@
 """
 DealerRater Scraper — Spiffy KALI Campaign
 ==========================================
-Scrapes franchised car dealership listings from DealerRater.com.
-Outputs a clean CSV ready for AI-ARK contact enrichment.
+Approach:
+  1. Download the public DealerRater sitemap from S3
+  2. Filter dealer URLs by OEM brand name
+  3. Scrape each dealer detail page for city/state/rating/staff/contact
+  4. Filter by target states, tag with rep/variant, output CSV
 
 Usage:
-    # Probe one combo to verify selectors (always run first):
-    python main.py --probe --oem Ford --state Texas
-
-    # Scrape a single combo:
-    python main.py --oem Ford --state Texas
-
-    # Scrape all Tier 1 combos:
-    python main.py --tier 1
-
-    # Scrape everything:
-    python main.py --tier all
+    python main.py                        # Garrison states, 5 OEMs
+    python main.py --oem Ford             # Ford only
+    python main.py --oem Ford --state California
+    python main.py --debug-url URL        # Scrape one URL, print result
 
 Requirements:
-    pip install playwright beautifulsoup4 lxml
-    python -m playwright install chromium
+    pip install requests beautifulsoup4 lxml
 """
 
 import argparse
-import asyncio
 import csv
 import json
 import logging
@@ -32,11 +26,9 @@ import os
 import sys
 from dataclasses import dataclass, fields, asdict
 from io import TextIOWrapper
-from typing import Optional
 
 import config
-from scraper import DealerRaterScraper
-import parser as dr_parser
+import scraper as dr_scraper
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -46,6 +38,23 @@ logging.basicConfig(
 )
 log = logging.getLogger("main")
 
+# ── Target states (Garrison territory by default) ──────────────────────────────
+GARRISON_STATES_DISPLAY = {
+    "AK", "AZ", "CA", "CO", "HI", "ID", "MN", "MT", "ND",
+    "NM", "NV", "OR", "SD", "UT", "WA", "WY",
+}
+
+# Map full state names → abbreviations (for matching scraped state text)
+STATE_ABBR = {
+    "alaska": "AK", "arizona": "AZ", "california": "CA", "colorado": "CO",
+    "hawaii": "HI", "idaho": "ID", "minnesota": "MN", "montana": "MT",
+    "north dakota": "ND", "new mexico": "NM", "nevada": "NV", "oregon": "OR",
+    "south dakota": "SD", "utah": "UT", "washington": "WA", "wyoming": "WY",
+    # Abbreviations pass through
+    "ak": "AK", "az": "AZ", "ca": "CA", "co": "CO", "hi": "HI", "id": "ID",
+    "mn": "MN", "mt": "MT", "nd": "ND", "nm": "NM", "nv": "NV", "or": "OR",
+    "sd": "SD", "ut": "UT", "wa": "WA", "wy": "WY",
+}
 
 # ── Data model ─────────────────────────────────────────────────────────────────
 @dataclass
@@ -68,19 +77,16 @@ class DealerRecord:
 
 
 # ── CSV helpers ────────────────────────────────────────────────────────────────
-def open_csv_writer(
-    output_path: str, append: bool = False
-) -> tuple[TextIOWrapper, csv.DictWriter]:
+def open_csv_writer(path: str, append: bool = False) -> tuple[TextIOWrapper, csv.DictWriter]:
     field_names = [f.name for f in fields(DealerRecord)]
-    mode = "a" if append else "w"
-    fh = open(output_path, mode, newline="", encoding="utf-8")
+    fh = open(path, "a" if append else "w", newline="", encoding="utf-8")
     writer = csv.DictWriter(fh, fieldnames=field_names)
     if not append:
         writer.writeheader()
     return fh, writer
 
 
-# ── Checkpoint helpers ─────────────────────────────────────────────────────────
+# ── Checkpoint ─────────────────────────────────────────────────────────────────
 def _load_checkpoint(path: str) -> set[str]:
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
@@ -94,240 +100,156 @@ def _save_checkpoint(path: str, done: set[str]) -> None:
         json.dump(sorted(done), f)
 
 
-# ── Scraping logic ─────────────────────────────────────────────────────────────
-async def scrape_combo(
-    scraper: DealerRaterScraper,
-    oem: str,
-    state: str,
-    writer: csv.DictWriter,
-    fh: TextIOWrapper,
-) -> int:
-    """Scrape all pages for one OEM+state combo. Returns record count written."""
-    url = f"https://www.dealerrater.com/dealer-reviews/{oem}-dealer/{state}/"
+# ── State resolution ───────────────────────────────────────────────────────────
+def _resolve_state_abbr(raw: str) -> str:
+    """Convert 'California', 'CA', 'california' → 'CA'. Returns '' if unknown."""
+    return STATE_ABBR.get(raw.strip().lower(), "")
+
+
+def _is_garrison_state(abbr: str) -> bool:
+    return abbr in GARRISON_STATES_DISPLAY
+
+
+# ── Main scrape logic ──────────────────────────────────────────────────────────
+def run_scrape(
+    oems: list[str],
+    filter_states: set[str],  # abbreviations, empty = no state filter
+    out_dir: str,
+    checkpoint_path: str,
+) -> None:
+    os.makedirs(os.path.join(out_dir, "raw"),   exist_ok=True)
+    os.makedirs(os.path.join(out_dir, "final"), exist_ok=True)
+
+    raw_path   = os.path.join(out_dir, "raw",   "dealerrater_raw.csv")
+    final_path = os.path.join(out_dir, "final", "garrison-states-master.csv")
+
+    done = _load_checkpoint(checkpoint_path)
+    session = dr_scraper.build_session()
+
+    # Download sitemap once
+    all_urls = dr_scraper.fetch_sitemap_urls(session)
+    if not all_urls:
+        log.error("Sitemap returned no URLs. Aborting.")
+        sys.exit(1)
+
+    # Build work list: (oem, dealer_url)
+    work: list[tuple[str, str]] = []
+    for oem in oems:
+        urls = dr_scraper.filter_urls_by_brand(all_urls, oem)
+        work.extend((oem, u) for u in urls)
+
+    log.info("Total dealers to scrape: %d", len(work))
+
+    append_mode = bool(done) and os.path.exists(raw_path)
+    fh, writer = open_csv_writer(raw_path, append=append_mode)
     written = 0
-    page_num = 1
 
-    while url:
-        log.info("  %s | %s | page %d", oem, state, page_num)
-        html = await scraper.fetch_listing_page(url)
-        if not html:
-            log.warning("  Failed to fetch listing page %d for %s/%s", page_num, oem, state)
-            break
+    try:
+        for i, (oem, url) in enumerate(work, 1):
+            if url in done:
+                continue
 
-        stubs, next_url = dr_parser.parse_listing_page(html)
-        if not stubs:
-            log.info("  No dealers found on page %d — stopping.", page_num)
-            # Dump HTML so we can diagnose selector mismatches
-            dump_path = f"output/raw/debug_listing_{oem}_{state}_p{page_num}.html"
-            with open(dump_path, "w", encoding="utf-8") as _f:
-                _f.write(html)
-            log.info("  HTML dumped to %s", dump_path)
-            break
+            data = dr_scraper.scrape_dealer_page(session, url)
+            done.add(url)
 
-        log.info("  Found %d dealers on page %d", len(stubs), page_num)
+            if not data:
+                continue
 
-        for stub in stubs:
-            detail: dict = {}
-            if stub.get("dealer_url"):
-                detail_html = await scraper.fetch_detail_page(stub["dealer_url"])
-                if detail_html:
-                    detail = dr_parser.parse_detail_page(detail_html)
-                else:
-                    log.debug("  Could not fetch detail page: %s", stub["dealer_url"])
+            # Resolve state abbreviation
+            state_abbr = _resolve_state_abbr(data.get("state", ""))
+
+            # Apply state filter
+            if filter_states and state_abbr not in filter_states:
+                continue
 
             record = DealerRecord(
-                dealer_name      = stub.get("dealer_name", ""),
-                city             = stub.get("city", ""),
-                state            = stub.get("state", ""),
-                rating           = stub.get("rating", ""),
-                review_count     = stub.get("review_count", 0),
-                website          = detail.get("website", ""),
-                phone            = detail.get("phone", ""),
-                icp_staff_names  = detail.get("icp_staff_names", ""),
-                icp_staff_titles = detail.get("icp_staff_titles", ""),
-                dealer_url       = stub.get("dealer_url", ""),
+                dealer_name      = data["dealer_name"],
+                city             = data["city"],
+                state            = state_abbr or data["state"],
+                rating           = data["rating"],
+                review_count     = data["review_count"],
+                website          = data["website"],
+                phone            = data["phone"],
+                icp_staff_names  = data["icp_staff_names"],
+                icp_staff_titles = data["icp_staff_titles"],
+                dealer_url       = url,
                 oem_brand        = oem,
                 copy_variant     = config.OEM_VARIANT.get(oem, ""),
-                assigned_rep     = config.get_rep(state),
+                assigned_rep     = "Garrison Ramoso" if _is_garrison_state(state_abbr) else config.get_rep(state_abbr),
                 profile_type     = "Launcher",
-                high_volume      = stub.get("review_count", 0) >= config.HIGH_VOLUME_THRESHOLD,
+                high_volume      = data["review_count"] >= config.HIGH_VOLUME_THRESHOLD,
             )
             writer.writerow(asdict(record))
             fh.flush()
             written += 1
 
-        url = next_url
-        page_num += 1
+            if i % 50 == 0:
+                _save_checkpoint(checkpoint_path, done)
+                log.info("Progress: %d/%d scraped, %d kept so far", i, len(work), written)
 
-    return written
+    finally:
+        fh.close()
+        _save_checkpoint(checkpoint_path, done)
 
-
-async def async_main(
-    combos: list[tuple[str, str]],
-    checkpoint_path: str,
-    fh: TextIOWrapper,
-    writer: csv.DictWriter,
-    done_combos: set[str],
-) -> None:
-    async with DealerRaterScraper() as scraper:
-        for oem, state in combos:
-            key = f"{oem}|{state}"
-            if key in done_combos:
-                log.info("Skipping %s (already done)", key)
-                continue
-            log.info("Scraping %s ...", key)
-            n = await scrape_combo(scraper, oem, state, writer, fh)
-            done_combos.add(key)
-            _save_checkpoint(checkpoint_path, done_combos)
-            log.info("%s: %d records written", key, n)
+    log.info("Scrape complete. %d dealers written to %s", written, raw_path)
+    _dedup(raw_path, final_path)
 
 
-# ── Probe mode ─────────────────────────────────────────────────────────────────
-async def run_probe(oem: str, state: str) -> None:
-    """Dump raw HTML snippets to help tune parser.SELECTORS."""
-    listing_url = f"https://www.dealerrater.com/dealer-reviews/{oem}-dealer/{state}/"
-    print(f"\n{'='*70}")
-    print(f"PROBE: {oem} | {state}")
-    print(f"{'='*70}\n")
-
-    async with DealerRaterScraper() as scraper:
-        # Listing page
-        print(f"[LISTING] {listing_url}\n")
-        html = await scraper.fetch_raw(listing_url)
-        if html:
-            print(html[:4000])
-            print("\n... (truncated) ...\n")
-
-            # Try to get one detail URL
-            stubs, _ = dr_parser.parse_listing_page(html)
-            if stubs and stubs[0].get("dealer_url"):
-                detail_url = stubs[0]["dealer_url"]
-                print(f"\n[DETAIL] {detail_url}\n")
-                detail_html = await scraper.fetch_raw(detail_url)
-                if detail_html:
-                    print(detail_html[:4000])
-                    print("\n... (truncated) ...\n")
-                else:
-                    print("  (detail fetch failed)")
-            else:
-                print("  (no dealer_url found in listing — selectors may need updating)")
-        else:
-            print("  (listing fetch failed)")
-
-
-# ── Dedup + merge ──────────────────────────────────────────────────────────────
-def merge_and_dedup(raw_path: str, final_path: str) -> None:
+def _dedup(raw_path: str, final_path: str) -> None:
     if not os.path.exists(raw_path):
-        log.warning("Raw CSV not found: %s", raw_path)
         return
-
     seen: dict[str, dict] = {}
     with open(raw_path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            key = row.get("dealer_url") or row.get("dealer_name", "") + "|" + row.get("city", "")
-            seen[key] = row  # last OEM scraped wins
-
-    os.makedirs(os.path.dirname(final_path) or ".", exist_ok=True)
+            key = row.get("dealer_url") or (row.get("dealer_name","") + "|" + row.get("city",""))
+            seen[key] = row
     rows = list(seen.values())
     if not rows:
-        log.warning("No rows to write to final CSV.")
         return
-
     with open(final_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)
-
-    log.info("Deduplicated %d raw rows → %d unique dealers → %s",
-             _count_rows(raw_path), len(rows), final_path)
-
-
-def _count_rows(path: str) -> int:
-    with open(path, newline="", encoding="utf-8") as f:
-        return sum(1 for _ in csv.DictReader(f))
+    log.info("Final CSV: %d unique dealers → %s", len(rows), final_path)
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Scrape DealerRater for Spiffy KALI lead list.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Examples:\n"
-            "  python main.py --probe --oem Ford --state Texas\n"
-            "  python main.py --oem Ford --state Texas\n"
-            "  python main.py --tier 1\n"
-            "  python main.py --tier all\n"
-        ),
-    )
-    p.add_argument("--tier", choices=["1", "2", "all"], default="1",
-                   help="Which tier of OEM/state combos to scrape (default: 1)")
-    p.add_argument("--oem",   help="Scrape a single OEM (e.g. Ford). Overrides --tier.")
-    p.add_argument("--state", help="Scrape a single state (e.g. Texas). Use with --oem.")
-    p.add_argument("--probe", action="store_true",
-                   help="Dump raw HTML for selector debugging, then exit.")
-    p.add_argument("--output-dir", default="output",
-                   help="Base output directory (default: output/)")
-    p.add_argument("--debug", action="store_true", help="Enable DEBUG logging.")
+    p = argparse.ArgumentParser(description="DealerRater scraper — Spiffy KALI")
+    p.add_argument("--oem", help="Single OEM (e.g. Ford). Default: all 5.")
+    p.add_argument("--state", help="Single state abbreviation filter (e.g. CA).")
+    p.add_argument("--all-states", action="store_true", help="No state filter — scrape all states.")
+    p.add_argument("--output-dir", default="output")
+    p.add_argument("--debug-url", help="Scrape a single URL and print the result, then exit.")
+    p.add_argument("--debug", action="store_true")
     return p.parse_args()
 
 
-def build_combos(args: argparse.Namespace) -> list[tuple[str, str]]:
-    if args.oem and args.state:
-        return [(args.oem, args.state)]
-    if args.oem:
-        all_combos = config.TIER_1 + config.TIER_2
-        return [(o, s) for o, s in all_combos if o == args.oem]
-    if args.tier == "1":
-        return config.TIER_1
-    if args.tier == "2":
-        return config.TIER_2
-    return config.TIER_1 + config.TIER_2
-
-
-# ── Entry point ────────────────────────────────────────────────────────────────
 def main() -> None:
     args = parse_args()
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    out_dir        = args.output_dir
-    raw_path       = os.path.join(out_dir, "raw", "dealerrater_raw.csv")
-    final_path     = os.path.join(out_dir, "final", "dealerrater_final.csv")
-    checkpoint_path = os.path.join(out_dir, ".checkpoint.json")
+    # Debug single URL mode
+    if args.debug_url:
+        session = dr_scraper.build_session()
+        result = dr_scraper.scrape_dealer_page(session, args.debug_url)
+        import pprint; pprint.pprint(result)
+        return
 
-    os.makedirs(os.path.join(out_dir, "raw"),   exist_ok=True)
-    os.makedirs(os.path.join(out_dir, "final"), exist_ok=True)
+    oems = [args.oem] if args.oem else list(dr_scraper.OEM_KEYWORDS.keys())
 
-    # ── Probe mode ─────────────────────────────────────────────────────────────
-    if args.probe:
-        oem   = args.oem   or "Ford"
-        state = args.state or "Texas"
-        asyncio.run(run_probe(oem, state))
-        sys.exit(0)
+    if args.all_states:
+        filter_states: set[str] = set()
+    elif args.state:
+        filter_states = {args.state.upper()}
+    else:
+        filter_states = GARRISON_STATES_DISPLAY  # Default: Garrison territory
 
-    # ── Normal run ─────────────────────────────────────────────────────────────
-    combos = build_combos(args)
-    if not combos:
-        log.error("No combos matched the given --oem / --state / --tier arguments.")
-        sys.exit(1)
+    checkpoint_path = os.path.join(args.output_dir, ".checkpoint.json")
 
-    done_combos = _load_checkpoint(checkpoint_path)
-    remaining   = [(o, s) for o, s in combos if f"{o}|{s}" not in done_combos]
-    log.info("Combos: %d total, %d already done, %d to scrape",
-             len(combos), len(done_combos), len(remaining))
-
-    append_mode = bool(done_combos) and os.path.exists(raw_path)
-    fh, writer  = open_csv_writer(raw_path, append=append_mode)
-
-    try:
-        asyncio.run(async_main(combos, checkpoint_path, fh, writer, done_combos))
-    finally:
-        fh.close()
-        _save_checkpoint(checkpoint_path, done_combos)
-
-    merge_and_dedup(raw_path, final_path)
-    log.info("Done. Final CSV: %s", final_path)
+    log.info("OEMs: %s | States: %s", oems, filter_states or "ALL")
+    run_scrape(oems, filter_states, args.output_dir, checkpoint_path)
 
 
 if __name__ == "__main__":

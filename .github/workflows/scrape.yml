@@ -2,180 +2,11 @@ name: DealerRater Scrape — Garrison States
 
 on:
   workflow_dispatch:
-    inputs:
-      debug:
-        description: 'Debug mode — scrape one combo and upload raw HTML (true/false)'
-        required: false
-        default: 'false'
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - oem: Ford
-            state: California
-          - oem: Toyota
-            state: California
-          - oem: Chrysler
-            state: California
-          - oem: Chevrolet
-            state: California
-          - oem: Mercedes-Benz
-            state: California
-          - oem: Ford
-            state: Alaska
-          - oem: Toyota
-            state: Alaska
-          - oem: Chrysler
-            state: Alaska
-          - oem: Chevrolet
-            state: Alaska
-          - oem: Mercedes-Benz
-            state: Alaska
-          - oem: Ford
-            state: Arizona
-          - oem: Toyota
-            state: Arizona
-          - oem: Chrysler
-            state: Arizona
-          - oem: Chevrolet
-            state: Arizona
-          - oem: Mercedes-Benz
-            state: Arizona
-          - oem: Ford
-            state: Colorado
-          - oem: Toyota
-            state: Colorado
-          - oem: Chrysler
-            state: Colorado
-          - oem: Chevrolet
-            state: Colorado
-          - oem: Mercedes-Benz
-            state: Colorado
-          - oem: Ford
-            state: Hawaii
-          - oem: Toyota
-            state: Hawaii
-          - oem: Chrysler
-            state: Hawaii
-          - oem: Chevrolet
-            state: Hawaii
-          - oem: Mercedes-Benz
-            state: Hawaii
-          - oem: Ford
-            state: Idaho
-          - oem: Toyota
-            state: Idaho
-          - oem: Chrysler
-            state: Idaho
-          - oem: Chevrolet
-            state: Idaho
-          - oem: Mercedes-Benz
-            state: Idaho
-          - oem: Ford
-            state: Minnesota
-          - oem: Toyota
-            state: Minnesota
-          - oem: Chrysler
-            state: Minnesota
-          - oem: Chevrolet
-            state: Minnesota
-          - oem: Mercedes-Benz
-            state: Minnesota
-          - oem: Ford
-            state: Montana
-          - oem: Toyota
-            state: Montana
-          - oem: Chrysler
-            state: Montana
-          - oem: Chevrolet
-            state: Montana
-          - oem: Mercedes-Benz
-            state: Montana
-          - oem: Ford
-            state: North-Dakota
-          - oem: Toyota
-            state: North-Dakota
-          - oem: Chrysler
-            state: North-Dakota
-          - oem: Chevrolet
-            state: North-Dakota
-          - oem: Mercedes-Benz
-            state: North-Dakota
-          - oem: Ford
-            state: New-Mexico
-          - oem: Toyota
-            state: New-Mexico
-          - oem: Chrysler
-            state: New-Mexico
-          - oem: Chevrolet
-            state: New-Mexico
-          - oem: Mercedes-Benz
-            state: New-Mexico
-          - oem: Ford
-            state: Nevada
-          - oem: Toyota
-            state: Nevada
-          - oem: Chrysler
-            state: Nevada
-          - oem: Chevrolet
-            state: Nevada
-          - oem: Mercedes-Benz
-            state: Nevada
-          - oem: Ford
-            state: Oregon
-          - oem: Toyota
-            state: Oregon
-          - oem: Chrysler
-            state: Oregon
-          - oem: Chevrolet
-            state: Oregon
-          - oem: Mercedes-Benz
-            state: Oregon
-          - oem: Ford
-            state: South-Dakota
-          - oem: Toyota
-            state: South-Dakota
-          - oem: Chrysler
-            state: South-Dakota
-          - oem: Chevrolet
-            state: South-Dakota
-          - oem: Mercedes-Benz
-            state: South-Dakota
-          - oem: Ford
-            state: Utah
-          - oem: Toyota
-            state: Utah
-          - oem: Chrysler
-            state: Utah
-          - oem: Chevrolet
-            state: Utah
-          - oem: Mercedes-Benz
-            state: Utah
-          - oem: Ford
-            state: Washington
-          - oem: Toyota
-            state: Washington
-          - oem: Chrysler
-            state: Washington
-          - oem: Chevrolet
-            state: Washington
-          - oem: Mercedes-Benz
-            state: Washington
-          - oem: Ford
-            state: Wyoming
-          - oem: Toyota
-            state: Wyoming
-          - oem: Chrysler
-            state: Wyoming
-          - oem: Chevrolet
-            state: Wyoming
-          - oem: Mercedes-Benz
-            state: Wyoming
+    timeout-minutes: 350
 
     steps:
       - uses: actions/checkout@v4
@@ -185,71 +16,23 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          python -m playwright install chromium
-          python -m playwright install-deps chromium
-          sudo apt-get install -y xvfb
+        run: pip install requests beautifulsoup4 lxml
 
-      - name: Scrape ${{ matrix.oem }} / ${{ matrix.state }}
-        run: xvfb-run -a python main.py --oem "${{ matrix.oem }}" --state "${{ matrix.state }}"
-
-      - name: Upload artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: raw-${{ matrix.oem }}-${{ matrix.state }}
-          path: output/raw/
-          retention-days: 7
-
-  merge:
-    runs-on: ubuntu-latest
-    needs: scrape
-    if: always()
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Download all raw artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts/
-          pattern: raw-*
-
-      - name: Merge and deduplicate
-        run: |
-          python3 - <<'EOF'
-          import csv, os, glob
-
-          seen = {}
-          header = None
-
-          for f in sorted(glob.glob("artifacts/**/*.csv", recursive=True)):
-              with open(f, newline="", encoding="utf-8") as fh:
-                  reader = csv.DictReader(fh)
-                  if header is None:
-                      header = reader.fieldnames
-                  for row in reader:
-                      key = row.get("dealer_url") or (row.get("dealer_name","") + "|" + row.get("city",""))
-                      seen[key] = row
-
-          rows = list(seen.values())
-          os.makedirs("output/final", exist_ok=True)
-          out = "output/final/garrison-states-master.csv"
-          with open(out, "w", newline="", encoding="utf-8") as f:
-              w = csv.DictWriter(f, fieldnames=header or [])
-              w.writeheader()
-              w.writerows(rows)
-          print(f"Total unique dealers: {len(rows)}")
-          EOF
+      - name: Run scraper
+        run: python main.py
 
       - name: Upload final CSV
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: GARRISON-STATES-FINAL
           path: output/final/garrison-states-master.csv
           retention-days: 30
+
+      - name: Upload raw CSV (backup)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-backup
+          path: output/raw/dealerrater_raw.csv
+          retention-days: 7
