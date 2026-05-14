@@ -2,6 +2,11 @@ name: DealerRater Scrape — Garrison States
 
 on:
   workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Debug mode — scrape one combo and upload raw HTML (true/false)'
+        required: false
+        default: 'false'
 
 jobs:
   scrape:
@@ -10,24 +15,167 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        oem: [Chrysler, Toyota, Chevrolet, Mercedes-Benz, Ford]
-        state:
-          - Alaska
-          - Arizona
-          - California
-          - Colorado
-          - Hawaii
-          - Idaho
-          - Minnesota
-          - Montana
-          - North-Dakota
-          - New-Mexico
-          - Nevada
-          - Oregon
-          - South-Dakota
-          - Utah
-          - Washington
-          - Wyoming
+        include:
+          - oem: Ford
+            state: California
+          - oem: Toyota
+            state: California
+          - oem: Chrysler
+            state: California
+          - oem: Chevrolet
+            state: California
+          - oem: Mercedes-Benz
+            state: California
+          - oem: Ford
+            state: Alaska
+          - oem: Toyota
+            state: Alaska
+          - oem: Chrysler
+            state: Alaska
+          - oem: Chevrolet
+            state: Alaska
+          - oem: Mercedes-Benz
+            state: Alaska
+          - oem: Ford
+            state: Arizona
+          - oem: Toyota
+            state: Arizona
+          - oem: Chrysler
+            state: Arizona
+          - oem: Chevrolet
+            state: Arizona
+          - oem: Mercedes-Benz
+            state: Arizona
+          - oem: Ford
+            state: Colorado
+          - oem: Toyota
+            state: Colorado
+          - oem: Chrysler
+            state: Colorado
+          - oem: Chevrolet
+            state: Colorado
+          - oem: Mercedes-Benz
+            state: Colorado
+          - oem: Ford
+            state: Hawaii
+          - oem: Toyota
+            state: Hawaii
+          - oem: Chrysler
+            state: Hawaii
+          - oem: Chevrolet
+            state: Hawaii
+          - oem: Mercedes-Benz
+            state: Hawaii
+          - oem: Ford
+            state: Idaho
+          - oem: Toyota
+            state: Idaho
+          - oem: Chrysler
+            state: Idaho
+          - oem: Chevrolet
+            state: Idaho
+          - oem: Mercedes-Benz
+            state: Idaho
+          - oem: Ford
+            state: Minnesota
+          - oem: Toyota
+            state: Minnesota
+          - oem: Chrysler
+            state: Minnesota
+          - oem: Chevrolet
+            state: Minnesota
+          - oem: Mercedes-Benz
+            state: Minnesota
+          - oem: Ford
+            state: Montana
+          - oem: Toyota
+            state: Montana
+          - oem: Chrysler
+            state: Montana
+          - oem: Chevrolet
+            state: Montana
+          - oem: Mercedes-Benz
+            state: Montana
+          - oem: Ford
+            state: North-Dakota
+          - oem: Toyota
+            state: North-Dakota
+          - oem: Chrysler
+            state: North-Dakota
+          - oem: Chevrolet
+            state: North-Dakota
+          - oem: Mercedes-Benz
+            state: North-Dakota
+          - oem: Ford
+            state: New-Mexico
+          - oem: Toyota
+            state: New-Mexico
+          - oem: Chrysler
+            state: New-Mexico
+          - oem: Chevrolet
+            state: New-Mexico
+          - oem: Mercedes-Benz
+            state: New-Mexico
+          - oem: Ford
+            state: Nevada
+          - oem: Toyota
+            state: Nevada
+          - oem: Chrysler
+            state: Nevada
+          - oem: Chevrolet
+            state: Nevada
+          - oem: Mercedes-Benz
+            state: Nevada
+          - oem: Ford
+            state: Oregon
+          - oem: Toyota
+            state: Oregon
+          - oem: Chrysler
+            state: Oregon
+          - oem: Chevrolet
+            state: Oregon
+          - oem: Mercedes-Benz
+            state: Oregon
+          - oem: Ford
+            state: South-Dakota
+          - oem: Toyota
+            state: South-Dakota
+          - oem: Chrysler
+            state: South-Dakota
+          - oem: Chevrolet
+            state: South-Dakota
+          - oem: Mercedes-Benz
+            state: South-Dakota
+          - oem: Ford
+            state: Utah
+          - oem: Toyota
+            state: Utah
+          - oem: Chrysler
+            state: Utah
+          - oem: Chevrolet
+            state: Utah
+          - oem: Mercedes-Benz
+            state: Utah
+          - oem: Ford
+            state: Washington
+          - oem: Toyota
+            state: Washington
+          - oem: Chrysler
+            state: Washington
+          - oem: Chevrolet
+            state: Washington
+          - oem: Mercedes-Benz
+            state: Washington
+          - oem: Ford
+            state: Wyoming
+          - oem: Toyota
+            state: Wyoming
+          - oem: Chrysler
+            state: Wyoming
+          - oem: Chevrolet
+            state: Wyoming
+          - oem: Mercedes-Benz
+            state: Wyoming
 
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +198,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: raw-${{ matrix.oem }}-${{ matrix.state }}
-          path: output/raw/dealerrater_raw.csv
+          path: output/raw/
           retention-days: 7
 
   merge:

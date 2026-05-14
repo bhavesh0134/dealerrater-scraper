@@ -117,6 +117,11 @@ async def scrape_combo(
         stubs, next_url = dr_parser.parse_listing_page(html)
         if not stubs:
             log.info("  No dealers found on page %d — stopping.", page_num)
+            # Dump HTML so we can diagnose selector mismatches
+            dump_path = f"output/raw/debug_listing_{oem}_{state}_p{page_num}.html"
+            with open(dump_path, "w", encoding="utf-8") as _f:
+                _f.write(html)
+            log.info("  HTML dumped to %s", dump_path)
             break
 
         log.info("  Found %d dealers on page %d", len(stubs), page_num)
