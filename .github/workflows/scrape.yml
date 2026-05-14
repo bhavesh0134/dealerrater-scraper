@@ -1,32 +1,38 @@
-name: DealerRater Scrape
+name: DealerRater Scrape — Garrison States
 
 on:
   workflow_dispatch:
-    inputs:
-      tier:
-        description: 'Tier to scrape (1, 2, or all)'
-        required: true
-        default: '1'
-      oem:
-        description: 'Single OEM — overrides tier (e.g. Ford)'
-        required: false
-        default: ''
-      state:
-        description: 'Single state — use with OEM (e.g. Texas)'
-        required: false
-        default: ''
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        oem: [Chrysler, Toyota, Chevrolet, Mercedes-Benz, Ford]
+        state:
+          - Alaska
+          - Arizona
+          - California
+          - Colorado
+          - Hawaii
+          - Idaho
+          - Minnesota
+          - Montana
+          - North-Dakota
+          - New-Mexico
+          - Nevada
+          - Oregon
+          - South-Dakota
+          - Utah
+          - Washington
+          - Wyoming
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -36,20 +42,65 @@ jobs:
           python -m playwright install chromium
           python -m playwright install-deps chromium
 
-      - name: Run scraper
-        run: |
-          if [ -n "${{ github.event.inputs.oem }}" ] && [ -n "${{ github.event.inputs.state }}" ]; then
-            python main.py --oem "${{ github.event.inputs.oem }}" --state "${{ github.event.inputs.state }}"
-          elif [ -n "${{ github.event.inputs.oem }}" ]; then
-            python main.py --oem "${{ github.event.inputs.oem }}"
-          else
-            python main.py --tier ${{ github.event.inputs.tier }}
-          fi
+      - name: Scrape ${{ matrix.oem }} / ${{ matrix.state }}
+        run: python main.py --oem "${{ matrix.oem }}" --state "${{ matrix.state }}"
 
-      - name: Upload CSV output
+      - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dealerrater-output-${{ github.run_id }}
-          path: output/
+          name: raw-${{ matrix.oem }}-${{ matrix.state }}
+          path: output/raw/dealerrater_raw.csv
+          retention-days: 7
+
+  merge:
+    runs-on: ubuntu-latest
+    needs: scrape
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download all raw artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          pattern: raw-*
+
+      - name: Merge and deduplicate
+        run: |
+          python3 - <<'EOF'
+          import csv, os, glob
+
+          seen = {}
+          header = None
+
+          for f in sorted(glob.glob("artifacts/**/*.csv", recursive=True)):
+              with open(f, newline="", encoding="utf-8") as fh:
+                  reader = csv.DictReader(fh)
+                  if header is None:
+                      header = reader.fieldnames
+                  for row in reader:
+                      key = row.get("dealer_url") or (row.get("dealer_name","") + "|" + row.get("city",""))
+                      seen[key] = row
+
+          rows = list(seen.values())
+          os.makedirs("output/final", exist_ok=True)
+          out = "output/final/garrison-states-master.csv"
+          with open(out, "w", newline="", encoding="utf-8") as f:
+              w = csv.DictWriter(f, fieldnames=header or [])
+              w.writeheader()
+              w.writerows(rows)
+          print(f"Total unique dealers: {len(rows)}")
+          EOF
+
+      - name: Upload final CSV
+        uses: actions/upload-artifact@v4
+        with:
+          name: GARRISON-STATES-FINAL
+          path: output/final/garrison-states-master.csv
           retention-days: 30
