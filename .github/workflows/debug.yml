@@ -18,10 +18,10 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 lxml
 
-      - name: Probe state-make sitemap + sample dealer page
+      - name: Probe dealer pages + sitemap size
         run: |
           python3 - <<'EOF' | tee probe_output.txt
-          import requests
+          import requests, re
           from bs4 import BeautifulSoup
 
           headers = {
@@ -31,67 +31,53 @@ jobs:
           }
           session = requests.Session()
 
-          # 1. Fetch state-make sitemap — real listing URLs
-          print("=== dealer-reviews-state-make-sitemap.xml ===")
-          r = session.get(
-              "https://uploads-dealerrater.s3.amazonaws.com/sitemap/US/dealer-reviews-state-make-sitemap.xml",
-              headers=headers, timeout=30
-          )
-          print(f"Status: {r.status_code}")
-          # Show first 50 URLs + filter for Ford/California
-          soup = BeautifulSoup(r.text, "xml")
-          locs = [l.text.strip() for l in soup.find_all("loc")]
-          print(f"Total URLs: {len(locs)}")
-          # Show first 20
-          for u in locs[:20]:
-              print(u)
-          print("...")
-          # Filter for our targets
-          targets = [u for u in locs if any(b.lower() in u.lower() for b in
-                     ["ford","toyota","chevrolet","chrysler","mercedes"]) and
-                     any(s.lower() in u.lower() for s in
-                     ["california","texas","alaska","arizona","colorado"])]
-          print(f"\n--- Matching target URLs: {len(targets)} ---")
-          for u in targets[:20]:
-              print(u)
-
-          # 2. Fetch dealership-reviews-sitemap to understand dealer URL format
-          print("\n=== dealership-reviews-sitemap.xml (first 30 URLs) ===")
-          r2 = session.get(
-              "https://uploads-dealerrater.s3.amazonaws.com/sitemap/US/dealership-reviews-sitemap.xml",
-              headers=headers, timeout=30, stream=True
-          )
-          print(f"Status: {r2.status_code}")
-          # Read just first 8KB to avoid huge download
-          chunk = next(r2.iter_content(8192)).decode("utf-8", errors="ignore")
-          soup2 = BeautifulSoup(chunk, "xml")
-          locs2 = [l.text.strip() for l in soup2.find_all("loc")]
-          for u in locs2[:30]:
-              print(u)
-
-          # 3. Fetch one of the real listing URLs if found
-          if targets:
-              print(f"\n=== Fetching first target listing page: {targets[0]} ===")
-              r3 = session.get(targets[0], headers=headers, timeout=30)
-              print(f"Status: {r3.status_code} | Final URL: {r3.url}")
-              soup3 = BeautifulSoup(r3.text, "lxml")
-              print(f"Title: {soup3.title.string if soup3.title else 'none'}")
-              # Find dealer cards
+          # 1. Try fetching a known Ford dealer page
+          test_urls = [
+              "https://www.dealerrater.com/dealer/Jack-Madden-Ford-Sales-Inc-dealer-reviews-75/",
+              "https://www.dealerrater.com/dealer/Fletcher-Jones-Toyota-of-Carson-dealer-reviews-94/",
+          ]
+          for url in test_urls:
+              r = session.get(url, headers=headers, timeout=20)
+              soup = BeautifulSoup(r.text, "lxml")
+              title = soup.title.string.strip() if soup.title else "none"
+              print(f"\n=== {url} ===")
+              print(f"Status: {r.status_code} | Final: {r.url}")
+              print(f"Title: {title}")
+              # Extract key fields
+              print("Body text snippet:", soup.get_text(" ", strip=True)[:500])
+              # Find classes with dealer info
               classes = set()
-              for tag in soup3.find_all(True):
+              for tag in soup.find_all(True):
                   for c in tag.get("class", []):
-                      if any(kw in c.lower() for kw in ["dealer","listing","review","result","card"]):
+                      if any(kw in c.lower() for kw in ["dealer","address","phone","rating","star","review","city","state","employee","staff"]):
                           classes.add(f"{tag.name}.{c}")
-              print("Dealer-related classes found:")
+              print("Relevant classes:")
               for c in sorted(classes)[:30]:
                   print(" ", c)
-              print("\nFirst 3000 chars of HTML:")
-              print(r3.text[:3000])
+
+          # 2. Count total dealers in sitemap + sample Ford/Garrison state dealers
+          print("\n\n=== SITEMAP ANALYSIS ===")
+          r = session.get(
+              "https://uploads-dealerrater.s3.amazonaws.com/sitemap/US/dealership-reviews-sitemap.xml",
+              headers=headers, timeout=30
+          )
+          urls = re.findall(r'<loc>(https://www\.dealerrater\.com/dealer/[^<]+)</loc>', r.text)
+          print(f"Total dealers in sitemap: {len(urls)}")
+
+          # Filter for our target brands
+          brands = ["Ford", "Toyota", "Chevrolet", "Chrysler", "Mercedes", "Jeep", "Ram", "Dodge", "GMC"]
+          matched = [u for u in urls if any(b.lower() in u.lower() for b in brands)]
+          print(f"Brand-matched dealers: {len(matched)}")
+
+          # Show sample
+          print("Sample matched URLs:")
+          for u in matched[:20]:
+              print(" ", u)
           EOF
 
       - name: Upload probe output
         uses: actions/upload-artifact@v4
         with:
-          name: probe-sitemap
+          name: probe-dealer-pages
           path: probe_output.txt
           retention-days: 3
