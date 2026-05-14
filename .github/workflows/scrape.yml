@@ -1,0 +1,55 @@
+name: DealerRater Scrape
+
+on:
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: 'Tier to scrape (1, 2, or all)'
+        required: true
+        default: '1'
+      oem:
+        description: 'Single OEM — overrides tier (e.g. Ford)'
+        required: false
+        default: ''
+      state:
+        description: 'Single state — use with OEM (e.g. Texas)'
+        required: false
+        default: ''
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install chromium
+          python -m playwright install-deps chromium
+
+      - name: Run scraper
+        run: |
+          if [ -n "${{ github.event.inputs.oem }}" ] && [ -n "${{ github.event.inputs.state }}" ]; then
+            python main.py --oem "${{ github.event.inputs.oem }}" --state "${{ github.event.inputs.state }}"
+          elif [ -n "${{ github.event.inputs.oem }}" ]; then
+            python main.py --oem "${{ github.event.inputs.oem }}"
+          else
+            python main.py --tier ${{ github.event.inputs.tier }}
+          fi
+
+      - name: Upload CSV output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dealerrater-output-${{ github.run_id }}
+          path: output/
+          retention-days: 30
