@@ -16,18 +16,47 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
+        run: pip install requests beautifulsoup4 lxml
+
+      - name: Probe with plain requests
         run: |
-          pip install -r requirements.txt
-          python -m playwright install chromium
-          python -m playwright install-deps chromium
-          sudo apt-get install -y xvfb
+          python3 - <<'EOF' | tee probe_output.txt
+          import requests
+          from bs4 import BeautifulSoup
 
-      - name: Dump listing + detail HTML
-        run: xvfb-run -a python main.py --probe --oem Ford --state California 2>&1 | tee probe_output.txt
+          headers = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+              "Accept-Language": "en-US,en;q=0.9",
+              "Accept-Encoding": "gzip, deflate, br",
+              "Connection": "keep-alive",
+              "Upgrade-Insecure-Requests": "1",
+              "Sec-Fetch-Dest": "document",
+              "Sec-Fetch-Mode": "navigate",
+              "Sec-Fetch-Site": "none",
+              "Sec-Fetch-User": "?1",
+              "Cache-Control": "max-age=0",
+          }
 
-      - name: Upload HTML dump
+          url = "https://www.dealerrater.com/dealer-reviews/Ford-dealer/California/"
+          session = requests.Session()
+          r = session.get(url, headers=headers, timeout=30)
+
+          print(f"Status: {r.status_code}")
+          print(f"Final URL: {r.url}")
+          print()
+
+          soup = BeautifulSoup(r.text, "lxml")
+          print(f"Title: {soup.title.string if soup.title else 'none'}")
+          print()
+
+          # Print first 5000 chars of HTML
+          print(r.text[:5000])
+          EOF
+
+      - name: Upload probe output
         uses: actions/upload-artifact@v4
         with:
-          name: probe-html
+          name: probe-requests
           path: probe_output.txt
           retention-days: 3
