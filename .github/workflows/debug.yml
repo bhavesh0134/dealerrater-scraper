@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 lxml
 
-      - name: Test URL variations + sitemap
+      - name: Probe state-make sitemap + sample dealer page
         run: |
           python3 - <<'EOF' | tee probe_output.txt
           import requests
@@ -26,59 +26,72 @@ jobs:
 
           headers = {
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
               "Accept-Language": "en-US,en;q=0.9",
-              "Sec-Fetch-Dest": "document",
-              "Sec-Fetch-Mode": "navigate",
-              "Sec-Fetch-Site": "none",
           }
-
           session = requests.Session()
 
-          # Test multiple URL variations
-          urls = [
-              "https://www.dealerrater.com/dealer-reviews/Ford-dealer/Texas/",
-              "https://www.dealerrater.com/dealer-reviews/Ford-Dealer/Texas/",
-              "https://www.dealerrater.com/dealer-reviews/ford-dealer/texas/",
-              "https://www.dealerrater.com/dealer-reviews/Ford-dealer/california/",
-              "https://www.dealerrater.com/",
-              "https://www.dealerrater.com/sitemap.xml",
-              "https://www.dealerrater.com/sitemap_index.xml",
-          ]
+          # 1. Fetch state-make sitemap — real listing URLs
+          print("=== dealer-reviews-state-make-sitemap.xml ===")
+          r = session.get(
+              "https://uploads-dealerrater.s3.amazonaws.com/sitemap/US/dealer-reviews-state-make-sitemap.xml",
+              headers=headers, timeout=30
+          )
+          print(f"Status: {r.status_code}")
+          # Show first 50 URLs + filter for Ford/California
+          soup = BeautifulSoup(r.text, "xml")
+          locs = [l.text.strip() for l in soup.find_all("loc")]
+          print(f"Total URLs: {len(locs)}")
+          # Show first 20
+          for u in locs[:20]:
+              print(u)
+          print("...")
+          # Filter for our targets
+          targets = [u for u in locs if any(b.lower() in u.lower() for b in
+                     ["ford","toyota","chevrolet","chrysler","mercedes"]) and
+                     any(s.lower() in u.lower() for s in
+                     ["california","texas","alaska","arizona","colorado"])]
+          print(f"\n--- Matching target URLs: {len(targets)} ---")
+          for u in targets[:20]:
+              print(u)
 
-          for url in urls:
-              try:
-                  r = session.get(url, headers=headers, timeout=15, allow_redirects=True)
-                  soup = BeautifulSoup(r.text, "lxml")
-                  title = soup.title.string.strip() if soup.title else "no title"
-                  print(f"{r.status_code} | {r.url[:80]} | {title[:60]}")
-              except Exception as e:
-                  print(f"ERROR | {url} | {e}")
+          # 2. Fetch dealership-reviews-sitemap to understand dealer URL format
+          print("\n=== dealership-reviews-sitemap.xml (first 30 URLs) ===")
+          r2 = session.get(
+              "https://uploads-dealerrater.s3.amazonaws.com/sitemap/US/dealership-reviews-sitemap.xml",
+              headers=headers, timeout=30, stream=True
+          )
+          print(f"Status: {r2.status_code}")
+          # Read just first 8KB to avoid huge download
+          chunk = next(r2.iter_content(8192)).decode("utf-8", errors="ignore")
+          soup2 = BeautifulSoup(chunk, "xml")
+          locs2 = [l.text.strip() for l in soup2.find_all("loc")]
+          for u in locs2[:30]:
+              print(u)
 
-          # If sitemap accessible, print first 3000 chars
-          print("\n--- SITEMAP CONTENT ---")
-          try:
-              r = session.get("https://www.dealerrater.com/sitemap.xml", headers=headers, timeout=15)
-              print(r.text[:3000])
-          except Exception as e:
-              print(f"Sitemap error: {e}")
-
-          # Print homepage structure to find real URL patterns
-          print("\n--- HOMEPAGE LINKS ---")
-          try:
-              r = session.get("https://www.dealerrater.com/", headers=headers, timeout=15)
-              soup = BeautifulSoup(r.text, "lxml")
-              links = soup.find_all("a", href=True)
-              dr_links = [a["href"] for a in links if "dealer" in a["href"].lower()]
-              for l in dr_links[:20]:
-                  print(l)
-          except Exception as e:
-              print(f"Homepage error: {e}")
+          # 3. Fetch one of the real listing URLs if found
+          if targets:
+              print(f"\n=== Fetching first target listing page: {targets[0]} ===")
+              r3 = session.get(targets[0], headers=headers, timeout=30)
+              print(f"Status: {r3.status_code} | Final URL: {r3.url}")
+              soup3 = BeautifulSoup(r3.text, "lxml")
+              print(f"Title: {soup3.title.string if soup3.title else 'none'}")
+              # Find dealer cards
+              classes = set()
+              for tag in soup3.find_all(True):
+                  for c in tag.get("class", []):
+                      if any(kw in c.lower() for kw in ["dealer","listing","review","result","card"]):
+                          classes.add(f"{tag.name}.{c}")
+              print("Dealer-related classes found:")
+              for c in sorted(classes)[:30]:
+                  print(" ", c)
+              print("\nFirst 3000 chars of HTML:")
+              print(r3.text[:3000])
           EOF
 
       - name: Upload probe output
         uses: actions/upload-artifact@v4
         with:
-          name: probe-urls
+          name: probe-sitemap
           path: probe_output.txt
           retention-days: 3
