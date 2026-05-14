@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 lxml
 
-      - name: Probe with plain requests
+      - name: Test URL variations + sitemap
         run: |
           python3 - <<'EOF' | tee probe_output.txt
           import requests
@@ -28,35 +28,57 @@ jobs:
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
               "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
               "Accept-Language": "en-US,en;q=0.9",
-              "Accept-Encoding": "gzip, deflate, br",
-              "Connection": "keep-alive",
-              "Upgrade-Insecure-Requests": "1",
               "Sec-Fetch-Dest": "document",
               "Sec-Fetch-Mode": "navigate",
               "Sec-Fetch-Site": "none",
-              "Sec-Fetch-User": "?1",
-              "Cache-Control": "max-age=0",
           }
 
-          url = "https://www.dealerrater.com/dealer-reviews/Ford-dealer/California/"
           session = requests.Session()
-          r = session.get(url, headers=headers, timeout=30)
 
-          print(f"Status: {r.status_code}")
-          print(f"Final URL: {r.url}")
-          print()
+          # Test multiple URL variations
+          urls = [
+              "https://www.dealerrater.com/dealer-reviews/Ford-dealer/Texas/",
+              "https://www.dealerrater.com/dealer-reviews/Ford-Dealer/Texas/",
+              "https://www.dealerrater.com/dealer-reviews/ford-dealer/texas/",
+              "https://www.dealerrater.com/dealer-reviews/Ford-dealer/california/",
+              "https://www.dealerrater.com/",
+              "https://www.dealerrater.com/sitemap.xml",
+              "https://www.dealerrater.com/sitemap_index.xml",
+          ]
 
-          soup = BeautifulSoup(r.text, "lxml")
-          print(f"Title: {soup.title.string if soup.title else 'none'}")
-          print()
+          for url in urls:
+              try:
+                  r = session.get(url, headers=headers, timeout=15, allow_redirects=True)
+                  soup = BeautifulSoup(r.text, "lxml")
+                  title = soup.title.string.strip() if soup.title else "no title"
+                  print(f"{r.status_code} | {r.url[:80]} | {title[:60]}")
+              except Exception as e:
+                  print(f"ERROR | {url} | {e}")
 
-          # Print first 5000 chars of HTML
-          print(r.text[:5000])
+          # If sitemap accessible, print first 3000 chars
+          print("\n--- SITEMAP CONTENT ---")
+          try:
+              r = session.get("https://www.dealerrater.com/sitemap.xml", headers=headers, timeout=15)
+              print(r.text[:3000])
+          except Exception as e:
+              print(f"Sitemap error: {e}")
+
+          # Print homepage structure to find real URL patterns
+          print("\n--- HOMEPAGE LINKS ---")
+          try:
+              r = session.get("https://www.dealerrater.com/", headers=headers, timeout=15)
+              soup = BeautifulSoup(r.text, "lxml")
+              links = soup.find_all("a", href=True)
+              dr_links = [a["href"] for a in links if "dealer" in a["href"].lower()]
+              for l in dr_links[:20]:
+                  print(l)
+          except Exception as e:
+              print(f"Homepage error: {e}")
           EOF
 
       - name: Upload probe output
         uses: actions/upload-artifact@v4
         with:
-          name: probe-requests
+          name: probe-urls
           path: probe_output.txt
           retention-days: 3
