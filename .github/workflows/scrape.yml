@@ -15,10 +15,6 @@ jobs:
         rep: [garrison, justin, mike]
       fail-fast: false
 
-    defaults:
-      run:
-        working-directory: dealerrater-scraper
-
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +22,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: dealerrater-scraper/requirements.txt
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -39,7 +35,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.rep }}-states-FINAL-${{ github.run_id }}
-          path: dealerrater-scraper/output/final/${{ matrix.rep }}-states-master.csv
+          path: output/final/${{ matrix.rep }}-states-master.csv
           retention-days: 30
 
       - name: Upload raw CSV (backup)
@@ -47,5 +43,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.rep }}-raw-backup-${{ github.run_id }}
-          path: dealerrater-scraper/output/raw/dealerrater_raw.csv
+          path: output/raw/dealerrater_raw.csv
           retention-days: 7
