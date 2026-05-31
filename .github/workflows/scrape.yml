@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: '0 3 * * 0'   # Every Sunday at 3 AM UTC
   workflow_dispatch:
-    inputs:
-      rep:
-        description: 'Rep territory to scrape (garrison / justin / mike / all)'
-        required: false
-        default: 'all'
 
 jobs:
   scrape:
@@ -19,11 +14,6 @@ jobs:
       matrix:
         rep: [garrison, justin, mike]
       fail-fast: false
-    # On manual dispatch, skip reps not selected (unless 'all' or schedule)
-    if: >
-      github.event_name == 'schedule' ||
-      github.event.inputs.rep == 'all' ||
-      github.event.inputs.rep == matrix.rep
 
     defaults:
       run:
