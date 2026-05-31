@@ -1,8 +1,6 @@
 name: DealerRater Scrape — Spiffy KALI
 
 on:
-  schedule:
-    - cron: '0 3 * * 0'   # Every Sunday at 3 AM UTC
   workflow_dispatch:
 
 jobs:
