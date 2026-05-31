@@ -1,43 +1,61 @@
-name: DealerRater Scrape
+name: DealerRater Scrape — Spiffy KALI
 
 on:
+  schedule:
+    - cron: '0 3 * * 0'   # Every Sunday at 3 AM UTC
   workflow_dispatch:
     inputs:
       rep:
-        description: 'Rep territory to scrape (garrison / justin / mike)'
-        required: true
-        default: 'garrison'
+        description: 'Rep territory to scrape (garrison / justin / mike / all)'
+        required: false
+        default: 'all'
 
 jobs:
   scrape:
+    name: Scrape — ${{ matrix.rep }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    strategy:
+      matrix:
+        rep: [garrison, justin, mike]
+      fail-fast: false
+    # On manual dispatch, skip reps not selected (unless 'all' or schedule)
+    if: >
+      github.event_name == 'schedule' ||
+      github.event.inputs.rep == 'all' ||
+      github.event.inputs.rep == matrix.rep
+
+    defaults:
+      run:
+        working-directory: dealerrater-scraper
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: dealerrater-scraper/requirements.txt
 
       - name: Install dependencies
-        run: pip install requests beautifulsoup4 lxml
+        run: pip install -r requirements.txt
 
-      - name: Run scraper
-        run: python main.py --rep ${{ github.event.inputs.rep }}
+      - name: Run scraper — ${{ matrix.rep }}
+        run: python main.py --rep ${{ matrix.rep }}
 
       - name: Upload final CSV
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.rep }}-states-FINAL
-          path: output/final/garrison-states-master.csv
+          name: ${{ matrix.rep }}-states-FINAL-${{ github.run_id }}
+          path: dealerrater-scraper/output/final/${{ matrix.rep }}-states-master.csv
           retention-days: 30
 
       - name: Upload raw CSV (backup)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.rep }}-raw-backup
-          path: output/raw/dealerrater_raw.csv
+          name: ${{ matrix.rep }}-raw-backup-${{ github.run_id }}
+          path: dealerrater-scraper/output/raw/dealerrater_raw.csv
           retention-days: 7

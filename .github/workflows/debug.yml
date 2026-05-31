@@ -65,7 +65,7 @@ jobs:
           print(f"Total dealers in sitemap: {len(urls)}")
 
           # Filter for our target brands
-          brands = ["Ford", "Toyota", "Chevrolet", "Chrysler", "Mercedes", "Jeep", "Ram", "Dodge", "GMC"]
+          brands = ["Ford", "Toyota", "Chevrolet", "Chrysler", "Mercedes", "Jeep", "Ram", "Dodge", "GMC", "Honda", "Nissan", "KIA"]
           matched = [u for u in urls if any(b.lower() in u.lower() for b in brands)]
           print(f"Brand-matched dealers: {len(matched)}")
 

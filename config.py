@@ -53,6 +53,9 @@ OEM_VARIANT: dict[str, str] = {
     "Cadillac":     "C",
     "Mercedes-Benz": "D",
     "Toyota":       "E",
+    "Honda":        "F",
+    "Nissan":       "G",
+    "KIA":          "H",
 }
 
 # State strings match the hyphenated DealerRater URL form

@@ -151,12 +151,13 @@ def run_scrape(
     filter_states: set[str],  # abbreviations, empty = no state filter
     out_dir: str,
     checkpoint_path: str,
+    rep_name: str = "all",
 ) -> None:
     os.makedirs(os.path.join(out_dir, "raw"),   exist_ok=True)
     os.makedirs(os.path.join(out_dir, "final"), exist_ok=True)
 
     raw_path   = os.path.join(out_dir, "raw",   "dealerrater_raw.csv")
-    final_path = os.path.join(out_dir, "final", "garrison-states-master.csv")
+    final_path = os.path.join(out_dir, "final", f"{rep_name}-states-master.csv")
 
     done = _load_checkpoint(checkpoint_path)
     session = dr_scraper.build_session()
@@ -287,7 +288,7 @@ def main() -> None:
     checkpoint_path = os.path.join(args.output_dir, ".checkpoint.json")
 
     log.info("OEMs: %s | States: %s", oems, filter_states or "ALL")
-    run_scrape(oems, filter_states, args.output_dir, checkpoint_path)
+    run_scrape(oems, filter_states, args.output_dir, checkpoint_path, rep_name=args.rep or "all")
 
 
 if __name__ == "__main__":
