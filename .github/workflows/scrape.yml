@@ -2,6 +2,14 @@ name: DealerRater Scrape — Spiffy KALI
 
 on:
   workflow_dispatch:
+    inputs:
+      brands:
+        description: 'Space-separated OEM list (e.g. GMC Dodge Ram Subaru Cadillac)'
+        required: false
+        default: 'GMC Dodge Ram Subaru Cadillac'
+
+env:
+  BRANDS: ${{ github.event.inputs.brands || 'GMC Dodge Ram Subaru Cadillac' }}
 
 jobs:
   scrape:
@@ -26,20 +34,20 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run scraper — ${{ matrix.rep }}
-        run: python main.py --rep ${{ matrix.rep }}
+        run: python main.py --rep ${{ matrix.rep }} --oem ${{ env.BRANDS }}
 
-      - name: Upload final CSV
+      - name: Upload final CSV (net-new brands only)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.rep }}-states-FINAL-${{ github.run_id }}
-          path: output/final/${{ matrix.rep }}-states-master.csv
+          name: ${{ matrix.rep }}-NEW-BRANDS-FINAL-${{ github.run_id }}
+          path: output/final/${{ matrix.rep }}-*-master.csv
           retention-days: 30
 
       - name: Upload raw CSV (backup)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.rep }}-raw-backup-${{ github.run_id }}
-          path: output/raw/dealerrater_raw.csv
+          name: ${{ matrix.rep }}-NEW-BRANDS-raw-${{ github.run_id }}
+          path: output/raw/dealerrater_*_raw.csv
           retention-days: 7

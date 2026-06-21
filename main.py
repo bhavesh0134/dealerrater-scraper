@@ -156,8 +156,9 @@ def run_scrape(
     os.makedirs(os.path.join(out_dir, "raw"),   exist_ok=True)
     os.makedirs(os.path.join(out_dir, "final"), exist_ok=True)
 
-    raw_path   = os.path.join(out_dir, "raw",   "dealerrater_raw.csv")
-    final_path = os.path.join(out_dir, "final", f"{rep_name}-states-master.csv")
+    brand_slug = "-".join(o.lower().replace("-", "").replace(" ", "") for o in oems) if oems else "all-brands"
+    raw_path   = os.path.join(out_dir, "raw",   f"dealerrater_{brand_slug}_raw.csv")
+    final_path = os.path.join(out_dir, "final", f"{rep_name}-{brand_slug}-master.csv")
 
     done = _load_checkpoint(checkpoint_path)
     session = dr_scraper.build_session()
@@ -252,7 +253,7 @@ def _dedup(raw_path: str, final_path: str) -> None:
 # ── CLI ────────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="DealerRater scraper — Spiffy KALI")
-    p.add_argument("--oem", help="Single OEM (e.g. Ford). Default: all 5.")
+    p.add_argument("--oem", nargs="+", metavar="OEM", help="One or more OEMs (e.g. GMC Dodge Ram). Default: all.")
     p.add_argument("--state", help="Single state abbreviation filter (e.g. CA).")
     p.add_argument("--rep", choices=["garrison","justin","mike"], help="Filter by rep territory.")
     p.add_argument("--all-states", action="store_true", help="No state filter — scrape all states.")
@@ -274,7 +275,7 @@ def main() -> None:
         import pprint; pprint.pprint(result)
         return
 
-    oems = [args.oem] if args.oem else list(dr_scraper.OEM_KEYWORDS.keys())
+    oems = args.oem if args.oem else list(dr_scraper.OEM_KEYWORDS.keys())
 
     if args.all_states:
         filter_states: set[str] = set()

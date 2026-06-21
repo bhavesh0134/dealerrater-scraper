@@ -41,6 +41,11 @@ OEM_KEYWORDS: dict[str, list[str]] = {
     "Honda":        ["honda"],
     "Nissan":       ["nissan"],
     "KIA":          ["kia"],
+    "GMC":          ["gmc"],
+    "Dodge":        ["dodge"],
+    "Ram":          ["ram"],
+    "Cadillac":     ["cadillac"],
+    "Subaru":       ["subaru"],
 }
 
 
