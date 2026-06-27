@@ -156,7 +156,12 @@ def run_scrape(
     os.makedirs(os.path.join(out_dir, "raw"),   exist_ok=True)
     os.makedirs(os.path.join(out_dir, "final"), exist_ok=True)
 
-    brand_slug = "-".join(o.lower().replace("-", "").replace(" ", "") for o in oems) if oems else "all-brands"
+    if oems and len(oems) > 5:
+        brand_slug = f"{len(oems)}-net-new-brands"
+    elif oems:
+        brand_slug = "-".join(o.lower().replace("-", "").replace(" ", "") for o in oems)
+    else:
+        brand_slug = "all-brands"
     raw_path   = os.path.join(out_dir, "raw",   f"dealerrater_{brand_slug}_raw.csv")
     final_path = os.path.join(out_dir, "final", f"{rep_name}-{brand_slug}-master.csv")
 

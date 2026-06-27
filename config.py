@@ -57,6 +57,21 @@ OEM_VARIANT: dict[str, str] = {
     "Nissan":       "G",
     "KIA":          "H",
     "Subaru":       "I",
+    "Hyundai":      "J",
+    "Volkswagen":   "K",
+    "Mazda":        "L",
+    "BMW":          "M",
+    "Mitsubishi":   "N",
+    "Audi":         "O",
+    "Lexus":        "P",
+    "Acura":        "Q",
+    "Volvo":        "R",
+    "Infiniti":     "S",
+    "Mini":         "T",
+    "Land-Rover":   "U",
+    "Porsche":      "V",
+    "Genesis":      "W",
+    "Jaguar":       "X",
 }
 
 # State strings match the hyphenated DealerRater URL form

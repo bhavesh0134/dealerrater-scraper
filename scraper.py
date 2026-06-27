@@ -46,6 +46,22 @@ OEM_KEYWORDS: dict[str, list[str]] = {
     "Ram":          ["ram"],
     "Cadillac":     ["cadillac"],
     "Subaru":       ["subaru"],
+    "Hyundai":      ["hyundai"],
+    "Volkswagen":   ["volkswagen", "vw"],
+    "Mazda":        ["mazda"],
+    "BMW":          ["bmw"],
+    "Mitsubishi":   ["mitsubishi"],
+    "Audi":         ["audi"],
+    "Lexus":        ["lexus"],
+    "Acura":        ["acura"],
+    "Volvo":        ["volvo"],
+    "Infiniti":     ["infiniti"],
+    "Buick":        ["buick"],
+    "Mini":         ["mini"],
+    "Land-Rover":   ["land-rover"],
+    "Porsche":      ["porsche"],
+    "Genesis":      ["genesis"],
+    "Jaguar":       ["jaguar"],
 }
 
 
