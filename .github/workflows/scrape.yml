@@ -6,10 +6,10 @@ on:
       brands:
         description: 'Space-separated OEM list'
         required: false
-        default: 'Hyundai Volkswagen Mazda BMW Mitsubishi Audi Lexus Acura Volvo Infiniti Buick Mini Land-Rover Porsche Genesis Jaguar'
+        default: 'Volkswagen Mazda BMW Mitsubishi Audi Lexus Acura Volvo Infiniti Buick Mini Land-Rover Porsche Jaguar'
 
 env:
-  BRANDS: ${{ github.event.inputs.brands || 'Hyundai Volkswagen Mazda BMW Mitsubishi Audi Lexus Acura Volvo Infiniti Buick Mini Land-Rover Porsche Genesis Jaguar' }}
+  BRANDS: ${{ github.event.inputs.brands || 'Volkswagen Mazda BMW Mitsubishi Audi Lexus Acura Volvo Infiniti Buick Mini Land-Rover Porsche Jaguar' }}
 
 jobs:
   scrape:
@@ -40,7 +40,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.rep }}-NET-NEW-16-BRANDS-FINAL-${{ github.run_id }}
+          name: ${{ matrix.rep }}-NET-NEW-14-BRANDS-FINAL-${{ github.run_id }}
           path: output/final/${{ matrix.rep }}-*-master.csv
           retention-days: 30
 
@@ -48,6 +48,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.rep }}-NET-NEW-16-BRANDS-raw-${{ github.run_id }}
+          name: ${{ matrix.rep }}-NET-NEW-14-BRANDS-raw-${{ github.run_id }}
           path: output/raw/dealerrater_*_raw.csv
           retention-days: 7

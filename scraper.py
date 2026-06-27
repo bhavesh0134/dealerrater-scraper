@@ -46,7 +46,6 @@ OEM_KEYWORDS: dict[str, list[str]] = {
     "Ram":          ["ram"],
     "Cadillac":     ["cadillac"],
     "Subaru":       ["subaru"],
-    "Hyundai":      ["hyundai"],
     "Volkswagen":   ["volkswagen", "vw"],
     "Mazda":        ["mazda"],
     "BMW":          ["bmw"],
@@ -60,7 +59,6 @@ OEM_KEYWORDS: dict[str, list[str]] = {
     "Mini":         ["mini"],
     "Land-Rover":   ["land-rover"],
     "Porsche":      ["porsche"],
-    "Genesis":      ["genesis"],
     "Jaguar":       ["jaguar"],
 }
 
