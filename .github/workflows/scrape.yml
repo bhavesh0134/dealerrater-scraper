@@ -3,13 +3,14 @@ name: DealerRater Scrape — Spiffy KALI
 on:
   workflow_dispatch:
     inputs:
-      brands:
-        description: 'Space-separated OEM list'
+      mode:
+        description: 'Scrape mode: sitemap or listing'
         required: false
-        default: 'Volkswagen Mazda BMW Mitsubishi Audi Lexus Acura Volvo Infiniti Buick Mini Land-Rover Porsche Jaguar'
-
-env:
-  BRANDS: ${{ github.event.inputs.brands || 'Volkswagen Mazda BMW Mitsubishi Audi Lexus Acura Volvo Infiniti Buick Mini Land-Rover Porsche Jaguar' }}
+        default: 'listing'
+      brands:
+        description: 'Space-separated OEM list (sitemap mode only)'
+        required: false
+        default: ''
 
 jobs:
   scrape:
@@ -33,21 +34,32 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run scraper — ${{ matrix.rep }}
-        run: python main.py --rep ${{ matrix.rep }} --oem ${{ env.BRANDS }}
+      - name: Run scraper — ${{ matrix.rep }} (${{ github.event.inputs.mode || 'listing' }} mode)
+        run: |
+          MODE="${{ github.event.inputs.mode || 'listing' }}"
+          if [ "$MODE" = "listing" ]; then
+            python main.py --mode listing --rep ${{ matrix.rep }} --exclude-file known_urls.txt
+          else
+            BRANDS="${{ github.event.inputs.brands }}"
+            if [ -z "$BRANDS" ]; then
+              python main.py --mode sitemap --rep ${{ matrix.rep }}
+            else
+              python main.py --mode sitemap --rep ${{ matrix.rep }} --oem $BRANDS
+            fi
+          fi
 
-      - name: Upload final CSV (net-new brands only)
+      - name: Upload final CSV
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.rep }}-NET-NEW-14-BRANDS-FINAL-${{ github.run_id }}
-          path: output/final/${{ matrix.rep }}-*-master.csv
+          name: ${{ matrix.rep }}-${{ github.event.inputs.mode || 'listing' }}-FINAL-${{ github.run_id }}
+          path: output/final/${{ matrix.rep }}-*.csv
           retention-days: 30
 
       - name: Upload raw CSV (backup)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.rep }}-NET-NEW-14-BRANDS-raw-${{ github.run_id }}
-          path: output/raw/dealerrater_*_raw.csv
+          name: ${{ matrix.rep }}-${{ github.event.inputs.mode || 'listing' }}-raw-${{ github.run_id }}
+          path: output/raw/*.csv
           retention-days: 7

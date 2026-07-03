@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 DealerRater scraper — requests-based, no Playwright.
-Uses the public S3 sitemap to get all dealer URLs, then scrapes detail pages.
+
+Two modes:
+  sitemap  — download S3 sitemap, filter by brand keyword in URL slug (original)
+  listing  — hit brand+state listing pages to catch ALL dealers for that brand,
+             including multi-brand dealers whose URL slug has no brand keyword
 """
 
 import logging
@@ -30,36 +34,60 @@ SITEMAP_URL = (
     "https://uploads-dealerrater.s3.amazonaws.com/sitemap/US/dealership-reviews-sitemap.xml"
 )
 
-# OEM brand keywords to match against dealer URL slugs
+# OEM brand keywords to match against dealer URL slugs (sitemap mode)
 OEM_KEYWORDS: dict[str, list[str]] = {
-    "Ford":         ["ford"],
-    "Toyota":       ["toyota"],
-    "Chevrolet":    ["chevrolet", "chevy"],
-    "Chrysler":     ["chrysler"],
+    "Ford":          ["ford"],
+    "Toyota":        ["toyota"],
+    "Chevrolet":     ["chevrolet", "chevy"],
+    "Chrysler":      ["chrysler"],
     "Mercedes-Benz": ["mercedes"],
-    "Jeep":         ["jeep"],
-    "Honda":        ["honda"],
-    "Nissan":       ["nissan"],
-    "KIA":          ["kia"],
-    "GMC":          ["gmc"],
-    "Dodge":        ["dodge"],
-    "Ram":          ["ram"],
-    "Cadillac":     ["cadillac"],
-    "Subaru":       ["subaru"],
-    "Volkswagen":   ["volkswagen", "vw"],
-    "Mazda":        ["mazda"],
-    "BMW":          ["bmw"],
-    "Mitsubishi":   ["mitsubishi"],
-    "Audi":         ["audi"],
-    "Lexus":        ["lexus"],
-    "Acura":        ["acura"],
-    "Volvo":        ["volvo"],
-    "Infiniti":     ["infiniti"],
-    "Buick":        ["buick"],
-    "Mini":         ["mini"],
-    "Land-Rover":   ["land-rover"],
-    "Porsche":      ["porsche"],
-    "Jaguar":       ["jaguar"],
+    "Jeep":          ["jeep"],
+    "Honda":         ["honda"],
+    "Nissan":        ["nissan"],
+    "KIA":           ["kia"],
+    "GMC":           ["gmc"],
+    "Dodge":         ["dodge"],
+    "Ram":           ["ram"],
+    "Cadillac":      ["cadillac"],
+    "Subaru":        ["subaru"],
+    "Volkswagen":    ["volkswagen", "vw"],
+    "Mazda":         ["mazda"],
+    "BMW":           ["bmw"],
+    "Mitsubishi":    ["mitsubishi"],
+    "Audi":          ["audi"],
+    "Lexus":         ["lexus"],
+    "Acura":         ["acura"],
+    "Volvo":         ["volvo"],
+    "Infiniti":      ["infiniti"],
+    "Buick":         ["buick"],
+    "Mini":          ["mini"],
+    "Land-Rover":    ["land-rover"],
+    "Porsche":       ["porsche"],
+    "Jaguar":        ["jaguar"],
+}
+
+# Renowned brands for listing mode — all OEM_KEYWORDS minus DNC (Hyundai, Genesis)
+RENOWNED_BRANDS: list[str] = [b for b in OEM_KEYWORDS]
+
+# State abbr → DealerRater listing-page URL state name
+STATE_URL_NAMES: dict[str, str] = {
+    "AK": "Alaska",        "AZ": "Arizona",       "CA": "California",
+    "CO": "Colorado",      "HI": "Hawaii",         "ID": "Idaho",
+    "MN": "Minnesota",     "MT": "Montana",        "ND": "North-Dakota",
+    "NM": "New-Mexico",    "NV": "Nevada",         "OR": "Oregon",
+    "SD": "South-Dakota",  "UT": "Utah",           "WA": "Washington",
+    "WY": "Wyoming",       "AL": "Alabama",        "AR": "Arkansas",
+    "FL": "Florida",       "GA": "Georgia",        "IA": "Iowa",
+    "KS": "Kansas",        "KY": "Kentucky",       "LA": "Louisiana",
+    "MO": "Missouri",      "MS": "Mississippi",    "NE": "Nebraska",
+    "OK": "Oklahoma",      "SC": "South-Carolina", "TN": "Tennessee",
+    "TX": "Texas",         "CT": "Connecticut",    "DC": "DC",
+    "DE": "Delaware",      "IL": "Illinois",       "IN": "Indiana",
+    "MA": "Massachusetts", "MD": "Maryland",       "ME": "Maine",
+    "MI": "Michigan",      "NH": "New-Hampshire",  "NJ": "New-Jersey",
+    "NY": "New-York",      "NC": "North-Carolina", "OH": "Ohio",
+    "PA": "Pennsylvania",  "RI": "Rhode-Island",   "VT": "Vermont",
+    "VA": "Virginia",      "WI": "Wisconsin",
 }
 
 
@@ -69,8 +97,9 @@ def build_session() -> requests.Session:
     return s
 
 
+# ── Sitemap mode ───────────────────────────────────────────────────────────────
+
 def fetch_sitemap_urls(session: requests.Session) -> list[str]:
-    """Download the dealership-reviews sitemap and return all dealer URLs."""
     log.info("Downloading sitemap from S3 ...")
     r = _safe_get(session, SITEMAP_URL)
     if not r:
@@ -83,28 +112,89 @@ def fetch_sitemap_urls(session: requests.Session) -> list[str]:
 
 
 def filter_urls_by_brand(urls: list[str], oem: str) -> list[str]:
-    """Return URLs whose slug contains a keyword matching the OEM brand."""
     keywords = OEM_KEYWORDS.get(oem, [oem.lower()])
     matched = [u for u in urls if any(kw in u.lower() for kw in keywords)]
     log.info("%s: %d URLs matched in sitemap", oem, len(matched))
     return matched
 
 
+# ── Listing mode ───────────────────────────────────────────────────────────────
+
+def fetch_listing_dealer_urls(
+    session: requests.Session,
+    brand: str,
+    state_abbr: str,
+    exclude_urls: set[str],
+) -> list[str]:
+    """
+    Paginate through DealerRater's brand+state listing pages and return
+    all dealer URLs not already in exclude_urls.
+    """
+    state_name = STATE_URL_NAMES.get(state_abbr)
+    if not state_name:
+        log.warning("No URL name mapped for state %s — skipping", state_abbr)
+        return []
+
+    brand_slug = brand.replace(" ", "-")
+    base_url = f"https://www.dealerrater.com/car-dealers/{brand_slug}-dealer/{state_name}/"
+
+    found: list[str] = []
+    page = 1
+
+    while True:
+        url = base_url if page == 1 else f"{base_url}?page={page}"
+        html = _safe_get(session, url, rate_limit=config.RATE_LIMIT_LISTING)
+        if not html:
+            break
+
+        page_urls = _extract_dealer_urls(html)
+        if not page_urls:
+            log.debug("%s / %s page %d: no dealer URLs found", brand, state_abbr, page)
+            break
+
+        added = 0
+        for u in page_urls:
+            if u not in exclude_urls:
+                found.append(u)
+                added += 1
+
+        log.debug("%s / %s page %d: %d URLs, %d new", brand, state_abbr, page, len(page_urls), added)
+
+        soup = BeautifulSoup(html, "lxml")
+        if not soup.select_one("a[rel='next']"):
+            break
+        page += 1
+
+    return found
+
+
+def _extract_dealer_urls(html: str) -> list[str]:
+    """Pull all /dealer/ links from a listing page, deduplicated and normalised."""
+    soup = BeautifulSoup(html, "lxml")
+    seen: set[str] = set()
+    urls: list[str] = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "/dealer/" not in href or "dealer-reviews" not in href:
+            continue
+        full = href if href.startswith("http") else "https://www.dealerrater.com" + href
+        clean = full.split("?")[0].rstrip("/") + "/"
+        if clean not in seen:
+            seen.add(clean)
+            urls.append(clean)
+    return urls
+
+
+# ── Detail page ────────────────────────────────────────────────────────────────
+
 def scrape_dealer_page(session: requests.Session, url: str) -> Optional[dict]:
-    """
-    Scrape a single dealer detail page.
-    Returns a dict with all fields or None on failure.
-    """
     html = _safe_get(session, url)
     if not html:
         return None
 
     soup = BeautifulSoup(html, "lxml")
-
-    # Try schema.org JSON-LD first — most reliable
     data = _parse_json_ld(soup)
 
-    # Fallback to HTML selectors
     dealer_name = (
         data.get("name")
         or _text(soup, "h1.dealer-name, h1.dealership-name, h1")
@@ -116,7 +206,6 @@ def scrape_dealer_page(session: requests.Session, url: str) -> Optional[dict]:
     city  = address.get("addressLocality") or _text(soup, ".city, [class*='city']")
     state = address.get("addressRegion")   or _text(soup, ".state, [class*='state']")
 
-    # Parse city/state from combined address text if needed
     if not city or not state:
         addr_text = _text(soup, ".dealer-address, [class*='address'], address")
         if addr_text and "," in addr_text:
@@ -127,27 +216,23 @@ def scrape_dealer_page(session: requests.Session, url: str) -> Optional[dict]:
                 state_zip = parts[-1].strip().split()
                 state = state_zip[0] if state_zip else ""
 
-    # Rating
     rating = (
         data.get("aggregateRating", {}).get("ratingValue")
         or _text(soup, "[class*='rating-static'], [class*='star-rating'], [itemprop='ratingValue']")
     )
 
-    # Review count
     review_count_raw = (
         str(data.get("aggregateRating", {}).get("reviewCount", ""))
         or _text(soup, "[class*='review-count'], [itemprop='reviewCount']")
     )
     review_count = _parse_int(review_count_raw)
 
-    # Phone
     phone_el = soup.select_one("a[href^='tel:'], [class*='phone']")
     phone = ""
     if phone_el:
         href = phone_el.get("href", "")
         phone = href.replace("tel:", "").strip() if href.startswith("tel:") else phone_el.get_text(strip=True)
 
-    # Website
     website = data.get("url") or ""
     if not website:
         for a in soup.find_all("a", href=True):
@@ -156,7 +241,6 @@ def scrape_dealer_page(session: requests.Session, url: str) -> Optional[dict]:
                 website = href
                 break
 
-    # ICP staff
     icp_names, icp_titles = _parse_icp_staff(soup)
 
     return {
@@ -173,8 +257,9 @@ def scrape_dealer_page(session: requests.Session, url: str) -> Optional[dict]:
     }
 
 
+# ── Internal helpers ───────────────────────────────────────────────────────────
+
 def _parse_json_ld(soup: BeautifulSoup) -> dict:
-    """Extract schema.org structured data from JSON-LD script tags."""
     import json
     for script in soup.find_all("script", type="application/ld+json"):
         try:
@@ -190,7 +275,6 @@ def _parse_json_ld(soup: BeautifulSoup) -> dict:
 
 def _parse_icp_staff(soup: BeautifulSoup) -> tuple[list[str], list[str]]:
     names, titles = [], []
-    # Try multiple selectors for staff sections
     members = (
         soup.select("[class*='employee-review']") or
         soup.select("[class*='staff-member']") or
@@ -222,12 +306,16 @@ def _parse_int(text: str) -> int:
     return int(m.group(0).replace(",", "")) if m else 0
 
 
-def _safe_get(session: requests.Session, url: str) -> Optional[str]:
+def _safe_get(
+    session: requests.Session,
+    url: str,
+    rate_limit: float = config.RATE_LIMIT_DETAIL,
+) -> Optional[str]:
     for attempt in range(config.MAX_RETRIES):
         try:
             r = session.get(url, timeout=25)
             r.raise_for_status()
-            time.sleep(config.RATE_LIMIT_DETAIL + random.uniform(0, 0.5))
+            time.sleep(rate_limit + random.uniform(0, 0.5))
             return r.text
         except Exception as exc:
             wait = 2 ** attempt

@@ -2,20 +2,22 @@
 """
 DealerRater Scraper — Spiffy KALI Campaign
 ==========================================
-Approach:
-  1. Download the public DealerRater sitemap from S3
-  2. Filter dealer URLs by OEM brand name
-  3. Scrape each dealer detail page for city/state/rating/staff/contact
-  4. Filter by target states, tag with rep/variant, output CSV
+Two modes:
+
+  sitemap (default)
+    Download S3 sitemap → filter by brand keyword in URL slug → scrape details.
+
+  listing
+    For each renowned brand × each rep state, paginate DealerRater listing
+    pages to collect ALL dealer URLs (catches multi-brand/generic-name dealers
+    the sitemap mode misses) → skip any in --exclude-file → scrape details.
 
 Usage:
-    python main.py                        # Garrison states, 5 OEMs
-    python main.py --oem Ford             # Ford only
-    python main.py --oem Ford --state California
-    python main.py --debug-url URL        # Scrape one URL, print result
-
-Requirements:
-    pip install requests beautifulsoup4 lxml
+    python main.py --rep garrison                        # sitemap mode, Garrison states
+    python main.py --mode listing --rep garrison         # listing mode, Garrison states
+    python main.py --mode listing --rep garrison \\
+        --exclude-file known_urls.txt                    # skip already-scraped dealers
+    python main.py --debug-url URL                       # single-URL debug
 """
 
 import argparse
@@ -30,7 +32,6 @@ from io import TextIOWrapper
 import config
 import scraper as dr_scraper
 
-# ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -58,26 +59,21 @@ REP_STATES: dict[str, set[str]] = {
     "mike":     MIKE_STATES,
 }
 
-# Map full state names → abbreviations (for matching scraped state text)
 STATE_ABBR = {
-    # Garrison
     "alaska": "AK", "arizona": "AZ", "california": "CA", "colorado": "CO",
     "hawaii": "HI", "idaho": "ID", "minnesota": "MN", "montana": "MT",
     "north dakota": "ND", "new mexico": "NM", "nevada": "NV", "oregon": "OR",
     "south dakota": "SD", "utah": "UT", "washington": "WA", "wyoming": "WY",
-    # Justin
     "alabama": "AL", "arkansas": "AR", "florida": "FL", "georgia": "GA",
     "iowa": "IA", "kansas": "KS", "kentucky": "KY", "louisiana": "LA",
     "missouri": "MO", "mississippi": "MS", "nebraska": "NE", "oklahoma": "OK",
     "south carolina": "SC", "tennessee": "TN", "texas": "TX",
-    # Mike
     "connecticut": "CT", "dc": "DC", "district of columbia": "DC",
     "delaware": "DE", "illinois": "IL", "indiana": "IN",
     "massachusetts": "MA", "maryland": "MD", "maine": "ME", "michigan": "MI",
     "new hampshire": "NH", "new jersey": "NJ", "new york": "NY",
     "north carolina": "NC", "ohio": "OH", "pennsylvania": "PA",
     "rhode island": "RI", "vermont": "VT", "virginia": "VA", "wisconsin": "WI",
-    # All abbreviations pass through
     "ak":"AK","az":"AZ","ca":"CA","co":"CO","hi":"HI","id":"ID","mn":"MN",
     "mt":"MT","nd":"ND","nm":"NM","nv":"NV","or":"OR","sd":"SD","ut":"UT",
     "wa":"WA","wy":"WY","al":"AL","ar":"AR","fl":"FL","ga":"GA","ia":"IA",
@@ -87,6 +83,7 @@ STATE_ABBR = {
     "ny":"NY","nc":"NC","oh":"OH","pa":"PA","ri":"RI","vt":"VT","va":"VA",
     "wi":"WI",
 }
+
 
 # ── Data model ─────────────────────────────────────────────────────────────────
 @dataclass
@@ -132,9 +129,18 @@ def _save_checkpoint(path: str, done: set[str]) -> None:
         json.dump(sorted(done), f)
 
 
-# ── State resolution ───────────────────────────────────────────────────────────
+# ── Exclude file (master list URLs) ───────────────────────────────────────────
+def load_exclude_urls(path: str) -> set[str]:
+    if not path or not os.path.exists(path):
+        return set()
+    with open(path, encoding="utf-8") as f:
+        urls = {line.strip() for line in f if line.strip()}
+    log.info("Loaded %d excluded URLs from %s", len(urls), path)
+    return urls
+
+
+# ── State helpers ──────────────────────────────────────────────────────────────
 def _resolve_state_abbr(raw: str) -> str:
-    """Convert 'California', 'CA', 'california' → 'CA'. Returns '' if unknown."""
     return STATE_ABBR.get(raw.strip().lower(), "")
 
 
@@ -145,10 +151,31 @@ def _get_rep(abbr: str) -> str:
     return ""
 
 
-# ── Main scrape logic ──────────────────────────────────────────────────────────
+def _write_record(writer, data: dict, url: str, brand: str, state_abbr: str) -> None:
+    record = DealerRecord(
+        dealer_name      = data["dealer_name"],
+        city             = data["city"],
+        state            = state_abbr or data["state"],
+        rating           = data["rating"],
+        review_count     = data["review_count"],
+        website          = data["website"],
+        phone            = data["phone"],
+        icp_staff_names  = data["icp_staff_names"],
+        icp_staff_titles = data["icp_staff_titles"],
+        dealer_url       = url,
+        oem_brand        = brand,
+        copy_variant     = config.OEM_VARIANT.get(brand, ""),
+        assigned_rep     = _get_rep(state_abbr),
+        profile_type     = "Launcher",
+        high_volume      = data["review_count"] >= config.HIGH_VOLUME_THRESHOLD,
+    )
+    writer.writerow(asdict(record))
+
+
+# ── Sitemap mode ───────────────────────────────────────────────────────────────
 def run_scrape(
     oems: list[str],
-    filter_states: set[str],  # abbreviations, empty = no state filter
+    filter_states: set[str],
     out_dir: str,
     checkpoint_path: str,
     rep_name: str = "all",
@@ -162,19 +189,18 @@ def run_scrape(
         brand_slug = "-".join(o.lower().replace("-", "").replace(" ", "") for o in oems)
     else:
         brand_slug = "all-brands"
+
     raw_path   = os.path.join(out_dir, "raw",   f"dealerrater_{brand_slug}_raw.csv")
     final_path = os.path.join(out_dir, "final", f"{rep_name}-{brand_slug}-master.csv")
 
     done = _load_checkpoint(checkpoint_path)
     session = dr_scraper.build_session()
 
-    # Download sitemap once
     all_urls = dr_scraper.fetch_sitemap_urls(session)
     if not all_urls:
         log.error("Sitemap returned no URLs. Aborting.")
         sys.exit(1)
 
-    # Build work list: (oem, dealer_url)
     work: list[tuple[str, str]] = []
     for oem in oems:
         urls = dr_scraper.filter_urls_by_brand(all_urls, oem)
@@ -197,37 +223,17 @@ def run_scrape(
             if not data:
                 continue
 
-            # Resolve state abbreviation
             state_abbr = _resolve_state_abbr(data.get("state", ""))
-
-            # Apply state filter
             if filter_states and state_abbr not in filter_states:
                 continue
 
-            record = DealerRecord(
-                dealer_name      = data["dealer_name"],
-                city             = data["city"],
-                state            = state_abbr or data["state"],
-                rating           = data["rating"],
-                review_count     = data["review_count"],
-                website          = data["website"],
-                phone            = data["phone"],
-                icp_staff_names  = data["icp_staff_names"],
-                icp_staff_titles = data["icp_staff_titles"],
-                dealer_url       = url,
-                oem_brand        = oem,
-                copy_variant     = config.OEM_VARIANT.get(oem, ""),
-                assigned_rep     = _get_rep(state_abbr),
-                profile_type     = "Launcher",
-                high_volume      = data["review_count"] >= config.HIGH_VOLUME_THRESHOLD,
-            )
-            writer.writerow(asdict(record))
+            _write_record(writer, data, url, oem, state_abbr)
             fh.flush()
             written += 1
 
             if i % 50 == 0:
                 _save_checkpoint(checkpoint_path, done)
-                log.info("Progress: %d/%d scraped, %d kept so far", i, len(work), written)
+                log.info("Progress: %d/%d scraped, %d kept", i, len(work), written)
 
     finally:
         fh.close()
@@ -237,13 +243,88 @@ def run_scrape(
     _dedup(raw_path, final_path)
 
 
+# ── Listing mode ───────────────────────────────────────────────────────────────
+def run_listing_scrape(
+    brands: list[str],
+    filter_states: set[str],
+    out_dir: str,
+    checkpoint_path: str,
+    rep_name: str,
+    exclude_urls: set[str],
+) -> None:
+    os.makedirs(os.path.join(out_dir, "raw"),   exist_ok=True)
+    os.makedirs(os.path.join(out_dir, "final"), exist_ok=True)
+
+    raw_path   = os.path.join(out_dir, "raw",   f"listing_{rep_name}_raw.csv")
+    final_path = os.path.join(out_dir, "final", f"{rep_name}-listing-net-new-master.csv")
+
+    done = _load_checkpoint(checkpoint_path)
+    # URLs to skip = master list + already scraped this run
+    known: set[str] = exclude_urls | done
+    session = dr_scraper.build_session()
+
+    # Phase 1: collect all new dealer URLs from listing pages (brand × state)
+    log.info("Phase 1: collecting dealer URLs from listing pages ...")
+    work: list[tuple[str, str]] = []  # (brand, dealer_url)
+    seen_in_work: set[str] = set()
+
+    for state_abbr in sorted(filter_states):
+        for brand in brands:
+            new_urls = dr_scraper.fetch_listing_dealer_urls(session, brand, state_abbr, known)
+            for u in new_urls:
+                if u not in seen_in_work:
+                    work.append((brand, u))
+                    seen_in_work.add(u)
+                    known.add(u)  # prevent same URL appearing under another brand
+            log.info("  %s / %s: %d new URLs", brand, state_abbr, len(new_urls))
+
+    log.info("Phase 1 done. %d net-new dealers to scrape.", len(work))
+
+    # Phase 2: scrape each detail page
+    log.info("Phase 2: scraping dealer detail pages ...")
+    append_mode = bool(done) and os.path.exists(raw_path)
+    fh, writer = open_csv_writer(raw_path, append=append_mode)
+    written = 0
+
+    try:
+        for i, (brand, url) in enumerate(work, 1):
+            if url in done:
+                continue
+
+            data = dr_scraper.scrape_dealer_page(session, url)
+            done.add(url)
+
+            if not data:
+                continue
+
+            state_abbr = _resolve_state_abbr(data.get("state", ""))
+            if filter_states and state_abbr not in filter_states:
+                continue
+
+            _write_record(writer, data, url, brand, state_abbr)
+            fh.flush()
+            written += 1
+
+            if i % 100 == 0:
+                _save_checkpoint(checkpoint_path, done)
+                log.info("Progress: %d/%d scraped, %d kept", i, len(work), written)
+
+    finally:
+        fh.close()
+        _save_checkpoint(checkpoint_path, done)
+
+    log.info("Scrape complete. %d net-new dealers written to %s", written, raw_path)
+    _dedup(raw_path, final_path)
+
+
+# ── Dedup ──────────────────────────────────────────────────────────────────────
 def _dedup(raw_path: str, final_path: str) -> None:
     if not os.path.exists(raw_path):
         return
     seen: dict[str, dict] = {}
     with open(raw_path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            key = row.get("dealer_url") or (row.get("dealer_name","") + "|" + row.get("city",""))
+            key = row.get("dealer_url") or (row.get("dealer_name", "") + "|" + row.get("city", ""))
             seen[key] = row
     rows = list(seen.values())
     if not rows:
@@ -258,10 +339,18 @@ def _dedup(raw_path: str, final_path: str) -> None:
 # ── CLI ────────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="DealerRater scraper — Spiffy KALI")
-    p.add_argument("--oem", nargs="+", metavar="OEM", help="One or more OEMs (e.g. GMC Dodge Ram). Default: all.")
+    p.add_argument("--mode", choices=["sitemap", "listing"], default="sitemap",
+                   help="sitemap: keyword filter on S3 sitemap (default). "
+                        "listing: paginate brand+state listing pages for full coverage.")
+    p.add_argument("--oem", nargs="+", metavar="OEM",
+                   help="One or more OEMs (sitemap mode). Default: all.")
+    p.add_argument("--exclude-file", metavar="FILE",
+                   help="Path to newline-delimited file of dealer URLs to skip (listing mode).")
     p.add_argument("--state", help="Single state abbreviation filter (e.g. CA).")
-    p.add_argument("--rep", choices=["garrison","justin","mike"], help="Filter by rep territory.")
-    p.add_argument("--all-states", action="store_true", help="No state filter — scrape all states.")
+    p.add_argument("--rep", choices=["garrison", "justin", "mike"],
+                   help="Filter by rep territory.")
+    p.add_argument("--all-states", action="store_true",
+                   help="No state filter — scrape all states.")
     p.add_argument("--output-dir", default="output")
     p.add_argument("--debug-url", help="Scrape a single URL and print the result, then exit.")
     p.add_argument("--debug", action="store_true")
@@ -273,14 +362,11 @@ def main() -> None:
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Debug single URL mode
     if args.debug_url:
         session = dr_scraper.build_session()
         result = dr_scraper.scrape_dealer_page(session, args.debug_url)
         import pprint; pprint.pprint(result)
         return
-
-    oems = args.oem if args.oem else list(dr_scraper.OEM_KEYWORDS.keys())
 
     if args.all_states:
         filter_states: set[str] = set()
@@ -289,12 +375,25 @@ def main() -> None:
     elif args.rep:
         filter_states = REP_STATES[args.rep]
     else:
-        filter_states = GARRISON_STATES  # Default: Garrison territory
+        filter_states = GARRISON_STATES
 
     checkpoint_path = os.path.join(args.output_dir, ".checkpoint.json")
 
-    log.info("OEMs: %s | States: %s", oems, filter_states or "ALL")
-    run_scrape(oems, filter_states, args.output_dir, checkpoint_path, rep_name=args.rep or "all")
+    if args.mode == "listing":
+        exclude_urls = load_exclude_urls(args.exclude_file or "")
+        brands = dr_scraper.RENOWNED_BRANDS
+        log.info("Mode: listing | Rep: %s | Brands: %d | Excluded URLs: %d",
+                 args.rep or "garrison", len(brands), len(exclude_urls))
+        run_listing_scrape(
+            brands, filter_states, args.output_dir,
+            checkpoint_path, rep_name=args.rep or "garrison",
+            exclude_urls=exclude_urls,
+        )
+    else:
+        oems = args.oem if args.oem else list(dr_scraper.OEM_KEYWORDS.keys())
+        log.info("Mode: sitemap | OEMs: %s | States: %s", oems, filter_states or "ALL")
+        run_scrape(oems, filter_states, args.output_dir, checkpoint_path,
+                   rep_name=args.rep or "all")
 
 
 if __name__ == "__main__":
