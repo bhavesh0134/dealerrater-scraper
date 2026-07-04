@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Scrape mode: sitemap or listing'
+        description: 'Scrape mode: sitemap, full-sitemap, or listing'
         required: false
-        default: 'listing'
+        default: 'full-sitemap'
       brands:
         description: 'Space-separated OEM list (sitemap mode only)'
         required: false
@@ -36,8 +36,10 @@ jobs:
 
       - name: Run scraper — ${{ matrix.rep }} (${{ github.event.inputs.mode || 'listing' }} mode)
         run: |
-          MODE="${{ github.event.inputs.mode || 'listing' }}"
-          if [ "$MODE" = "listing" ]; then
+          MODE="${{ github.event.inputs.mode || 'full-sitemap' }}"
+          if [ "$MODE" = "full-sitemap" ]; then
+            python main.py --mode full-sitemap --rep ${{ matrix.rep }} --exclude-file known_urls.txt
+          elif [ "$MODE" = "listing" ]; then
             python main.py --mode listing --rep ${{ matrix.rep }} --exclude-file known_urls.txt
           else
             BRANDS="${{ github.event.inputs.brands }}"
@@ -52,7 +54,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.rep }}-${{ github.event.inputs.mode || 'listing' }}-FINAL-${{ github.run_id }}
+          name: ${{ matrix.rep }}-${{ github.event.inputs.mode || 'full-sitemap' }}-FINAL-${{ github.run_id }}
           path: output/final/${{ matrix.rep }}-*.csv
           retention-days: 30
 
@@ -60,6 +62,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.rep }}-${{ github.event.inputs.mode || 'listing' }}-raw-${{ github.run_id }}
+          name: ${{ matrix.rep }}-${{ github.event.inputs.mode || 'full-sitemap' }}-raw-${{ github.run_id }}
           path: output/raw/*.csv
           retention-days: 7

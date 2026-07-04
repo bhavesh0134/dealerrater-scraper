@@ -2,15 +2,17 @@
 """
 DealerRater Scraper — Spiffy KALI Campaign
 ==========================================
-Two modes:
+Three modes:
 
   sitemap (default)
     Download S3 sitemap → filter by brand keyword in URL slug → scrape details.
 
-  listing
-    For each renowned brand × each rep state, paginate DealerRater listing
-    pages to collect ALL dealer URLs (catches multi-brand/generic-name dealers
-    the sitemap mode misses) → skip any in --exclude-file → scrape details.
+  full-sitemap
+    Download S3 sitemap → skip known URLs → scrape ALL remaining dealer pages →
+    detect brand from dealer name → keep only renowned-brand dealers in rep states.
+    Catches multi-brand/generic-name dealers the sitemap mode misses.
+
+  listing  [DEPRECATED — DealerRater listing pages are JS-rendered]
 
 Usage:
     python main.py --rep garrison                        # sitemap mode, Garrison states
@@ -243,6 +245,78 @@ def run_scrape(
     _dedup(raw_path, final_path)
 
 
+# ── Full-sitemap mode ──────────────────────────────────────────────────────────
+def run_full_sitemap_scrape(
+    filter_states: set[str],
+    out_dir: str,
+    checkpoint_path: str,
+    rep_name: str,
+    exclude_urls: set[str],
+) -> None:
+    """
+    Scrape every dealer in the S3 sitemap that isn't already known.
+    Detect the brand from the dealer's page name — catches multi-brand and
+    generic-name dealers the slug-keyword filter misses.
+    """
+    os.makedirs(os.path.join(out_dir, "raw"),   exist_ok=True)
+    os.makedirs(os.path.join(out_dir, "final"), exist_ok=True)
+
+    raw_path   = os.path.join(out_dir, "raw",   f"fullsitemap_{rep_name}_raw.csv")
+    final_path = os.path.join(out_dir, "final", f"{rep_name}-fullsitemap-net-new-master.csv")
+
+    done = _load_checkpoint(checkpoint_path)
+    known: set[str] = exclude_urls | done
+    session = dr_scraper.build_session()
+
+    all_urls = dr_scraper.fetch_sitemap_urls(session)
+    if not all_urls:
+        log.error("Sitemap returned no URLs. Aborting.")
+        sys.exit(1)
+
+    # Skip anything already known
+    work = [u for u in all_urls if u not in known]
+    log.info("Sitemap: %d total | %d already known | %d to scrape",
+             len(all_urls), len(all_urls) - len(work), len(work))
+
+    append_mode = bool(done) and os.path.exists(raw_path)
+    fh, writer = open_csv_writer(raw_path, append=append_mode)
+    written = 0
+
+    try:
+        for i, url in enumerate(work, 1):
+            if url in done:
+                continue
+
+            data = dr_scraper.scrape_dealer_page(session, url)
+            done.add(url)
+
+            if not data:
+                continue
+
+            state_abbr = _resolve_state_abbr(data.get("state", ""))
+            if filter_states and state_abbr not in filter_states:
+                continue
+
+            brand = dr_scraper.detect_brand_from_name(data["dealer_name"])
+            if not brand:
+                continue  # not a renowned-brand dealer
+
+            _write_record(writer, data, url, brand, state_abbr)
+            fh.flush()
+            written += 1
+
+            if i % 100 == 0:
+                _save_checkpoint(checkpoint_path, done)
+                log.info("Progress: %d/%d checked, %d renowned-brand dealers kept", i, len(work), written)
+
+    finally:
+        fh.close()
+        _save_checkpoint(checkpoint_path, done)
+
+    log.info("Scrape complete. %d net-new dealers written to %s", written, raw_path)
+    _dedup(raw_path, final_path)
+
+
 # ── Listing mode ───────────────────────────────────────────────────────────────
 def run_listing_scrape(
     brands: list[str],
@@ -339,9 +413,9 @@ def _dedup(raw_path: str, final_path: str) -> None:
 # ── CLI ────────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="DealerRater scraper — Spiffy KALI")
-    p.add_argument("--mode", choices=["sitemap", "listing"], default="sitemap",
-                   help="sitemap: keyword filter on S3 sitemap (default). "
-                        "listing: paginate brand+state listing pages for full coverage.")
+    p.add_argument("--mode", choices=["sitemap", "full-sitemap", "listing"], default="sitemap",
+                   help="sitemap: keyword-filter on S3 sitemap (default). "
+                        "full-sitemap: scrape ALL sitemap URLs, detect brand from dealer name.")
     p.add_argument("--oem", nargs="+", metavar="OEM",
                    help="One or more OEMs (sitemap mode). Default: all.")
     p.add_argument("--exclude-file", metavar="FILE",
@@ -379,7 +453,16 @@ def main() -> None:
 
     checkpoint_path = os.path.join(args.output_dir, ".checkpoint.json")
 
-    if args.mode == "listing":
+    if args.mode == "full-sitemap":
+        exclude_urls = load_exclude_urls(args.exclude_file or "")
+        log.info("Mode: full-sitemap | Rep: %s | Excluded URLs: %d",
+                 args.rep or "garrison", len(exclude_urls))
+        run_full_sitemap_scrape(
+            filter_states, args.output_dir,
+            checkpoint_path, rep_name=args.rep or "garrison",
+            exclude_urls=exclude_urls,
+        )
+    elif args.mode == "listing":
         exclude_urls = load_exclude_urls(args.exclude_file or "")
         brands = dr_scraper.RENOWNED_BRANDS
         log.info("Mode: listing | Rep: %s | Brands: %d | Excluded URLs: %d",

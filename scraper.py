@@ -66,8 +66,49 @@ OEM_KEYWORDS: dict[str, list[str]] = {
     "Jaguar":        ["jaguar"],
 }
 
-# Renowned brands for listing mode — all OEM_KEYWORDS minus DNC (Hyundai, Genesis)
+# Renowned brands for full-sitemap mode — all OEM_KEYWORDS minus DNC (Hyundai, Genesis)
 RENOWNED_BRANDS: list[str] = [b for b in OEM_KEYWORDS]
+
+# Brand name keywords for detecting brand from dealer name (broader than URL slug keywords)
+BRAND_NAME_KEYWORDS: dict[str, list[str]] = {
+    "Ford":          ["ford"],
+    "Toyota":        ["toyota"],
+    "Chevrolet":     ["chevrolet", "chevy"],
+    "Chrysler":      ["chrysler"],
+    "Mercedes-Benz": ["mercedes", "mercedes-benz"],
+    "Jeep":          ["jeep"],
+    "Honda":         ["honda"],
+    "Nissan":        ["nissan"],
+    "KIA":           ["kia"],
+    "GMC":           ["gmc"],
+    "Dodge":         ["dodge"],
+    "Ram":           ["ram"],
+    "Cadillac":      ["cadillac"],
+    "Subaru":        ["subaru"],
+    "Volkswagen":    ["volkswagen", " vw "],
+    "Mazda":         ["mazda"],
+    "BMW":           ["bmw"],
+    "Mitsubishi":    ["mitsubishi"],
+    "Audi":          ["audi"],
+    "Lexus":         ["lexus"],
+    "Acura":         ["acura"],
+    "Volvo":         ["volvo"],
+    "Infiniti":      ["infiniti"],
+    "Buick":         ["buick"],
+    "Mini":          ["mini"],
+    "Land-Rover":    ["land rover", "land-rover"],
+    "Porsche":       ["porsche"],
+    "Jaguar":        ["jaguar"],
+}
+
+
+def detect_brand_from_name(dealer_name: str) -> str:
+    """Return the first renowned brand found in the dealer name, or '' if none."""
+    name_lower = f" {dealer_name.lower()} "
+    for brand, keywords in BRAND_NAME_KEYWORDS.items():
+        if any(kw in name_lower for kw in keywords):
+            return brand
+    return ""
 
 # State abbr → DealerRater listing-page URL state name
 STATE_URL_NAMES: dict[str, str] = {
