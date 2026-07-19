@@ -297,9 +297,7 @@ def run_full_sitemap_scrape(
             if filter_states and state_abbr not in filter_states:
                 continue
 
-            brand = dr_scraper.detect_brand_from_name(data["dealer_name"])
-            if not brand:
-                continue  # not a renowned-brand dealer
+            brand = dr_scraper.detect_brand_from_name(data["dealer_name"]) or "Independent"
 
             _write_record(writer, data, url, brand, state_abbr)
             fh.flush()
@@ -307,7 +305,7 @@ def run_full_sitemap_scrape(
 
             if i % 100 == 0:
                 _save_checkpoint(checkpoint_path, done)
-                log.info("Progress: %d/%d checked, %d renowned-brand dealers kept", i, len(work), written)
+                log.info("Progress: %d/%d checked, %d dealers kept", i, len(work), written)
 
     finally:
         fh.close()
