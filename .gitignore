@@ -2,3 +2,12 @@ output/
 __pycache__/
 *.pyc
 .env
+
+# AI-Ark pipeline outputs — contain contact PII (names, emails, LinkedIn URLs), never commit
+ai_ark_pipeline/*_final.csv
+ai_ark_pipeline/*_no_email.csv
+ai_ark_pipeline/*_clay.csv
+ai_ark_pipeline/*_merged.csv
+ai_ark_pipeline/*_audited.csv
+ai_ark_pipeline/__pycache__/
+.DS_Store
