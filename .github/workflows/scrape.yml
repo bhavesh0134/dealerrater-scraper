@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 350
     strategy:
       matrix:
-        rep: [garrison, justin, mike]
+        rep: [garrison, justin, mike, brandon]
       fail-fast: false
 
     steps:

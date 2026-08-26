@@ -42,23 +42,29 @@ logging.basicConfig(
 log = logging.getLogger("main")
 
 # ── Rep territory state sets ───────────────────────────────────────────────────
+# Revised 2026-08-10 (Revised Sales Territory by Rep_Aug10'26.xlsx) — adds Brandon,
+# reshuffles states previously on Justin/Mike. See dealerrater-scraper memory.
 GARRISON_STATES = {
     "AK", "AZ", "CA", "CO", "HI", "ID", "MN", "MT", "ND",
-    "NM", "NV", "OR", "SD", "UT", "WA", "WY",
+    "NE", "NM", "NV", "OR", "SD", "UT", "WA", "WI", "WY",
 }
 JUSTIN_STATES = {
-    "AL", "AR", "FL", "GA", "IA", "KS", "KY", "LA", "MO",
-    "MS", "NE", "OK", "SC", "TN", "TX",
+    "AL", "AR", "FL", "GA", "KY", "LA", "MS",
+    "NC", "OK", "SC", "TN", "WV",
 }
 MIKE_STATES = {
-    "CT", "DC", "DE", "IL", "IN", "MA", "MD", "ME", "MI",
-    "NH", "NJ", "NY", "NC", "OH", "PA", "RI", "VT", "VA", "WI",
+    "CT", "DC", "DE", "MA", "MD", "ME",
+    "NH", "NJ", "NY", "PA", "RI", "VT", "VA",
+}
+BRANDON_STATES = {
+    "IL", "IN", "IA", "KS", "MI", "MO", "OH", "TX",
 }
 
 REP_STATES: dict[str, set[str]] = {
     "garrison": GARRISON_STATES,
     "justin":   JUSTIN_STATES,
     "mike":     MIKE_STATES,
+    "brandon":  BRANDON_STATES,
 }
 
 STATE_ABBR = {
@@ -150,6 +156,7 @@ def _get_rep(abbr: str) -> str:
     if abbr in GARRISON_STATES: return "Garrison Ramoso"
     if abbr in JUSTIN_STATES:   return "Justin Smith"
     if abbr in MIKE_STATES:     return "Mike Arena"
+    if abbr in BRANDON_STATES:  return "Brandon"
     return ""
 
 
@@ -419,7 +426,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--exclude-file", metavar="FILE",
                    help="Path to newline-delimited file of dealer URLs to skip (listing mode).")
     p.add_argument("--state", help="Single state abbreviation filter (e.g. CA).")
-    p.add_argument("--rep", choices=["garrison", "justin", "mike"],
+    p.add_argument("--rep", choices=["garrison", "justin", "mike", "brandon"],
                    help="Filter by rep territory.")
     p.add_argument("--all-states", action="store_true",
                    help="No state filter — scrape all states.")

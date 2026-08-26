@@ -74,23 +74,29 @@ OEM_VARIANT: dict[str, str] = {
 }
 
 # State strings match the hyphenated DealerRater URL form
+# Revised 2026-08-10 (Revised Sales Territory by Rep_Aug10'26.xlsx) — adds Brandon,
+# reshuffles states previously on Justin/Mike. See dealerrater-scraper memory.
 GARRISON_STATES = {
     "Alaska", "Arizona", "California", "Colorado", "Hawaii", "Idaho",
-    "Minnesota", "Montana", "North-Dakota", "New-Mexico", "Nevada",
-    "Oregon", "South-Dakota", "Utah", "Washington", "Wyoming",
+    "Minnesota", "Montana", "North-Dakota", "Nebraska", "New-Mexico", "Nevada",
+    "Oregon", "South-Dakota", "Utah", "Washington", "Wisconsin", "Wyoming",
 }
 
 JUSTIN_STATES = {
-    "Alabama", "Arkansas", "Florida", "Georgia", "Iowa", "Kansas",
-    "Kentucky", "Louisiana", "Missouri", "Mississippi", "Nebraska",
-    "Oklahoma", "South-Carolina", "Tennessee", "Texas",
+    "Alabama", "Arkansas", "Florida", "Georgia",
+    "Kentucky", "Louisiana", "Mississippi",
+    "North-Carolina", "Oklahoma", "South-Carolina", "Tennessee", "West-Virginia",
 }
 
 MIKE_STATES = {
-    "Connecticut", "DC", "Delaware", "Illinois", "Indiana", "Massachusetts",
-    "Maryland", "Maine", "Michigan", "New-Hampshire", "New-Jersey", "New-York",
-    "North-Carolina", "Ohio", "Pennsylvania", "Rhode-Island", "Vermont",
-    "Virginia", "Wisconsin",
+    "Connecticut", "DC", "Delaware", "Massachusetts",
+    "Maryland", "Maine", "New-Hampshire", "New-Jersey", "New-York",
+    "Pennsylvania", "Rhode-Island", "Vermont", "Virginia",
+}
+
+BRANDON_STATES = {
+    "Illinois", "Indiana", "Iowa", "Kansas", "Michigan", "Missouri",
+    "Ohio", "Texas",
 }
 
 
@@ -99,6 +105,8 @@ def get_rep(state: str) -> str:
         return "Garrison Ramoso"
     if state in JUSTIN_STATES:
         return "Justin Smith"
+    if state in BRANDON_STATES:
+        return "Brandon"
     return "Mike Arena"
 
 
