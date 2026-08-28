@@ -102,6 +102,18 @@ BRAND_NAME_KEYWORDS: dict[str, list[str]] = {
 }
 
 
+# DNC — never scrape or include these brands (Spiffy KALI campaign rule).
+# detect_brand_from_name only *fails to match* these (they're absent from
+# BRAND_NAME_KEYWORDS), which let full-sitemap mode fall through to
+# "Independent" and include them anyway. Actively exclude by name instead.
+DNC_KEYWORDS = ["hyundai", "genesis"]
+
+
+def is_dnc_brand(dealer_name: str) -> bool:
+    name_lower = f" {dealer_name.lower()} "
+    return any(kw in name_lower for kw in DNC_KEYWORDS)
+
+
 def detect_brand_from_name(dealer_name: str) -> str:
     """Return the first renowned brand found in the dealer name, or '' if none."""
     name_lower = f" {dealer_name.lower()} "

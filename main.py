@@ -300,6 +300,9 @@ def run_full_sitemap_scrape(
             if not data:
                 continue
 
+            if dr_scraper.is_dnc_brand(data["dealer_name"]):
+                continue
+
             state_abbr = _resolve_state_abbr(data.get("state", ""))
             if filter_states and state_abbr not in filter_states:
                 continue
